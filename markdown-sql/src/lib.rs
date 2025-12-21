@@ -104,10 +104,21 @@ pub use parser::{MarkdownParser, SqlBlock};
 // 数据库抽象
 pub use database::DbPool;
 
-// Repository 辅助函数
+// Repository 辅助函数（Pool 版本）
 pub use repository::{
     execute, query_list, query_one, query_optional, query_scalar, EmptyParams, Repository,
 };
+
+// Repository 辅助函数（Transaction 版本）
+pub use repository::{
+    execute_tx, query_list_tx, query_one_tx, query_optional_tx, query_scalar_tx,
+};
+
+// 批量操作
+pub use repository::{batch_execute, batch_execute_tx};
+
+// 事务辅助
+pub use repository::{begin_transaction, with_transaction};
 
 // 当启用 embed feature 时，重新导出 include_dir
 #[cfg(feature = "embed")]

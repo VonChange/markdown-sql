@@ -717,3 +717,208 @@ async fn test_connection_pool_stress() {
 
     println!("压力测试完成，连接池最大连接数: 5，并发任务: 20");
 }
+
+// ============================================================================
+// 新增：使用 repository 模块的事务和批量操作测试
+// ============================================================================
+
+use markdown_sql::{batch_execute, begin_transaction, query_list_tx, query_scalar_tx};
+
+/// 测试使用 _tx 函数的手动事务
+#[tokio::test]
+async fn test_transaction_with_tx_functions() {
+    let pool = setup_database().await;
+    let manager = setup_manager();
+
+    // 开启事务
+    let mut tx = begin_transaction(&pool).await.expect("开启事务失败");
+
+    // 在事务中插入数据
+    let insert_sql = manager
+        .render(
+            "insert",
+            &json!({"name": "事务用户1", "age": 25, "status": 1}),
+        )
+        .unwrap();
+    let result = ParamExtractor::extract(&insert_sql, DbType::Sqlite);
+
+    sqlx::query(&result.sql)
+        .bind("事务用户1")
+        .bind(25i32)
+        .bind(1i32)
+        .execute(&mut *tx)
+        .await
+        .expect("事务插入失败");
+
+    // 在事务中查询
+    let users: Vec<User> = query_list_tx(&manager, &mut tx, "findAll", &json!({}))
+        .await
+        .expect("事务查询失败");
+
+    assert_eq!(users.len(), 1, "事务中应该有 1 条数据");
+
+    // 提交事务
+    tx.commit().await.expect("提交事务失败");
+
+    // 提交后验证
+    let count_sql = manager.render("count", &json!({})).unwrap();
+    let result = ParamExtractor::extract(&count_sql, DbType::Sqlite);
+    let row = sqlx::query(&result.sql)
+        .fetch_one(&pool)
+        .await
+        .expect("查询失败");
+    let count: i64 = row.get("count");
+    assert_eq!(count, 1, "提交后应该有 1 条数据");
+
+    println!("✅ 手动事务测试通过");
+}
+
+/// 测试事务回滚
+#[tokio::test]
+async fn test_transaction_rollback_with_tx_functions() {
+    let pool = setup_database().await;
+    let manager = setup_manager();
+
+    // 开启事务
+    let mut tx = begin_transaction(&pool).await.expect("开启事务失败");
+
+    // 在事务中插入数据
+    let insert_sql = manager
+        .render(
+            "insert",
+            &json!({"name": "回滚用户", "age": 30, "status": 1}),
+        )
+        .unwrap();
+    let result = ParamExtractor::extract(&insert_sql, DbType::Sqlite);
+
+    sqlx::query(&result.sql)
+        .bind("回滚用户")
+        .bind(30i32)
+        .bind(1i32)
+        .execute(&mut *tx)
+        .await
+        .expect("事务插入失败");
+
+    // 在事务中验证数据存在
+    let count: i64 = query_scalar_tx(&manager, &mut tx, "count", &json!({}))
+        .await
+        .expect("事务查询失败");
+    assert_eq!(count, 1, "事务中应该有 1 条数据");
+
+    // 不提交，直接 drop（自动回滚）
+    drop(tx);
+
+    // 验证数据已回滚
+    let count_sql = manager.render("count", &json!({})).unwrap();
+    let result = ParamExtractor::extract(&count_sql, DbType::Sqlite);
+    let row = sqlx::query(&result.sql)
+        .fetch_one(&pool)
+        .await
+        .expect("查询失败");
+    let count: i64 = row.get("count");
+    assert_eq!(count, 0, "回滚后应该没有数据");
+
+    println!("✅ 事务回滚测试通过");
+}
+
+/// 用于批量插入的参数结构体
+#[derive(Debug, Serialize)]
+struct InsertParams {
+    name: String,
+    age: i32,
+    status: i32,
+}
+
+/// 测试批量操作
+#[tokio::test]
+async fn test_batch_execute() {
+    let pool = setup_database().await;
+    let manager = setup_manager();
+
+    // 准备批量数据
+    let users: Vec<InsertParams> = (0..5)
+        .map(|i| InsertParams {
+            name: format!("批量用户{}", i),
+            age: 20 + i,
+            status: 1,
+        })
+        .collect();
+
+    // 批量插入
+    let affected = batch_execute(&manager, &pool, "insert", &users)
+        .await
+        .expect("批量插入失败");
+
+    assert_eq!(affected, 5, "应该插入 5 条数据");
+
+    // 验证结果
+    let count_sql = manager.render("count", &json!({})).unwrap();
+    let result = ParamExtractor::extract(&count_sql, DbType::Sqlite);
+    let row = sqlx::query(&result.sql)
+        .fetch_one(&pool)
+        .await
+        .expect("查询失败");
+    let count: i64 = row.get("count");
+    assert_eq!(count, 5, "数据库中应该有 5 条数据");
+
+    println!("✅ 批量操作测试通过");
+}
+
+/// 测试批量操作空数组
+#[tokio::test]
+async fn test_batch_execute_empty() {
+    let pool = setup_database().await;
+    let manager = setup_manager();
+
+    // 空数组批量插入
+    let users: Vec<InsertParams> = vec![];
+    let affected = batch_execute(&manager, &pool, "insert", &users)
+        .await
+        .expect("批量插入失败");
+
+    assert_eq!(affected, 0, "空数组应该返回 0");
+
+    println!("✅ 空批量操作测试通过");
+}
+
+/// 测试事务内批量操作
+#[tokio::test]
+async fn test_batch_execute_in_transaction() {
+    use markdown_sql::batch_execute_tx;
+
+    let pool = setup_database().await;
+    let manager = setup_manager();
+
+    let mut tx = begin_transaction(&pool).await.expect("开启事务失败");
+
+    // 准备批量数据
+    let users: Vec<InsertParams> = (0..3)
+        .map(|i| InsertParams {
+            name: format!("事务批量用户{}", i),
+            age: 25 + i,
+            status: 1,
+        })
+        .collect();
+
+    // 在事务内批量插入
+    let affected = batch_execute_tx(&manager, &mut tx, "insert", &users)
+        .await
+        .expect("事务批量插入失败");
+
+    assert_eq!(affected, 3, "应该插入 3 条数据");
+
+    // 提交事务
+    tx.commit().await.expect("提交事务失败");
+
+    // 验证结果
+    let count_sql = manager.render("count", &json!({})).unwrap();
+    let result = ParamExtractor::extract(&count_sql, DbType::Sqlite);
+    let row = sqlx::query(&result.sql)
+        .fetch_one(&pool)
+        .await
+        .expect("查询失败");
+    let count: i64 = row.get("count");
+    assert_eq!(count, 3, "数据库中应该有 3 条数据");
+
+    println!("✅ 事务内批量操作测试通过");
+}

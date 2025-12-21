@@ -10,6 +10,8 @@
 - 🔗 **SQL 复用**：`{% include %}` 引用其他 SQL 片段
 - 🚀 **高性能**：启动时预编译模板，运行时零解析开销
 - 🎯 **trait 方式**：定义 trait 接口，宏自动生成实现
+- 🔄 **事务支持**：支持手动事务和闭包事务
+- 📦 **批量操作**：一条 SQL + 多组参数，预编译复用
 
 ## 📦 安装
 
@@ -93,24 +95,24 @@ pub trait UserRepository {
     /// 根据 ID 查询用户
     async fn find_by_id(
         &self,
-        db: &sqlx::Pool<sqlx::Sqlite>,
+        db: &impl DbPool,
         params: &IdParams,
     ) -> Result<Option<User>, AppError>;
 
     /// 条件查询
     async fn find_by_condition(
         &self,
-        db: &sqlx::Pool<sqlx::Sqlite>,
+        db: &impl DbPool,
         params: &ConditionParams,
     ) -> Result<Vec<User>, AppError>;
 
     /// 获取总数
-    async fn get_count(&self, db: &sqlx::Pool<sqlx::Sqlite>) -> Result<i64, AppError>;
+    async fn get_count(&self, db: &impl DbPool) -> Result<i64, AppError>;
 
     /// 插入用户
     async fn insert(
         &self,
-        db: &sqlx::Pool<sqlx::Sqlite>,
+        db: &impl DbPool,
         user: &User,
     ) -> Result<u64, AppError>;
 }
@@ -120,7 +122,7 @@ pub trait UserRepository {
 
 ```rust
 use include_dir::{include_dir, Dir};
-use markdown_sql::{DbType, SqlManager};
+use markdown_sql::{DbPool, DbType, SqlManager};
 use once_cell::sync::Lazy;
 
 // 嵌入 SQL 目录
@@ -147,7 +149,7 @@ pub fn get_user_repo() -> UserRepositoryImpl {
 }
 
 // 使用
-async fn example(db: &Pool<Sqlite>) {
+async fn example(db: &impl DbPool) {
     let repo = get_user_repo();
 
     // 查询单条
@@ -166,6 +168,104 @@ async fn example(db: &Pool<Sqlite>) {
     let affected = repo.insert(db, &new_user).await?;
 }
 ```
+
+## 🔄 事务支持
+
+### 手动事务
+
+```rust
+use markdown_sql::{begin_transaction, execute_tx, query_list_tx};
+
+// 开启事务
+let mut tx = begin_transaction(&db).await?;
+
+// 在事务中执行操作
+execute_tx(&manager, &mut tx, "insert", &user1).await?;
+execute_tx(&manager, &mut tx, "insert", &user2).await?;
+
+// 查询也可以在事务中
+let users: Vec<User> = query_list_tx(&manager, &mut tx, "findAll", &json!({})).await?;
+
+// 提交事务
+tx.commit().await?;
+
+// 如果不调用 commit()，事务会在 tx drop 时自动回滚
+```
+
+### 闭包事务
+
+```rust
+use markdown_sql::with_transaction;
+
+with_transaction(&db, |tx| Box::pin(async move {
+    execute_tx(&manager, tx, "insert", &user1).await?;
+    execute_tx(&manager, tx, "update", &user2).await?;
+    Ok(())
+})).await?;
+// 成功则自动 commit，失败则自动 rollback
+```
+
+## 📦 批量操作
+
+一条 SQL + 多组参数，预编译复用，在事务内执行：
+
+```rust
+use markdown_sql::batch_execute;
+
+// 准备数据
+let users = vec![
+    UserInsert { name: "用户1".into(), age: 25, status: 1 },
+    UserInsert { name: "用户2".into(), age: 30, status: 1 },
+    UserInsert { name: "用户3".into(), age: 28, status: 1 },
+];
+
+// 批量插入（内部自动开启事务）
+let affected = batch_execute(&manager, &db, "insert", &users).await?;
+println!("插入 {} 条", affected);
+```
+
+### 在事务中批量操作
+
+```rust
+use markdown_sql::{begin_transaction, batch_execute_tx};
+
+let mut tx = begin_transaction(&db).await?;
+
+// 批量插入
+batch_execute_tx(&manager, &mut tx, "insertUser", &users).await?;
+
+// 批量更新
+batch_execute_tx(&manager, &mut tx, "updateOrder", &orders).await?;
+
+tx.commit().await?;
+```
+
+## 🗃️ DbPool trait
+
+所有 Repository 方法的 `db` 参数接受实现了 `DbPool` trait 的类型：
+
+```rust
+use markdown_sql::DbPool;
+
+// 自定义数据库封装
+pub struct AppDb {
+    pub sqlite: Pool<Sqlite>,
+}
+
+impl DbPool for AppDb {
+    fn pool(&self) -> &Pool<Sqlite> {
+        &self.sqlite
+    }
+}
+
+// 使用时直接传 &db，不需要 &db.sqlite
+repo.find_by_id(&db, &params).await?;
+```
+
+框架已内置实现：
+- `Pool<Sqlite>`
+- `&Pool<Sqlite>`
+- `Arc<T>` where T: DbPool
 
 ## 📝 SQL 语法
 
@@ -266,7 +366,7 @@ AI:
    ​```
 
 2. 在 trait 中添加方法:
-   async fn find_by_email(&self, db: &Pool<Sqlite>, params: &EmailParams)
+   async fn find_by_email(&self, db: &impl DbPool, params: &EmailParams)
        -> Result<Option<User>, AppError>;
 
 3. 添加参数结构体:
@@ -276,6 +376,15 @@ AI:
    }
 
 完成！无需写任何执行代码。
+```
+
+## 📖 示例
+
+运行示例项目：
+
+```bash
+cd examples/demo
+cargo run
 ```
 
 ## 📖 文档
