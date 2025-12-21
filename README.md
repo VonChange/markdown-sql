@@ -1,43 +1,45 @@
 # markdown-sql
 
-将 SQL 存储在 Markdown 文件中的 Rust 框架，支持动态 SQL 和参数绑定。
+A Rust framework for storing SQL in Markdown files with dynamic SQL and parameter binding support.
 
-## ✨ 特性
+[中文文档](README.zh-CN.md)
 
-- 📝 **Markdown SQL**：SQL 写在 Markdown 代码块中，可读性强
-- 🔒 **安全**：编译时检查 SQL 注入风险，所有参数都通过绑定传入
-- 🎨 **动态 SQL**：使用 MiniJinja 模板语法，支持条件、循环
-- 🔗 **SQL 复用**：`{% include %}` 引用其他 SQL 片段
-- 🚀 **高性能**：启动时预编译模板，运行时零解析开销
-- 🔄 **事务支持**：SeaORM 风格的泛型执行器
-- 📦 **批量操作**：预编译复用，一条 SQL 批量执行
+## ✨ Features
 
-## 📦 安装
+- 📝 **Markdown SQL**: Write SQL in Markdown code blocks for better readability
+- 🔒 **Security**: Compile-time SQL injection checks, all parameters are bound
+- 🎨 **Dynamic SQL**: MiniJinja template syntax with conditionals and loops
+- 🔗 **SQL Reuse**: `{% include %}` to reference other SQL fragments
+- 🚀 **High Performance**: Pre-compiled templates at startup, zero parsing overhead at runtime
+- 🔄 **Transaction Support**: SeaORM-style generic executor
+- 📦 **Batch Operations**: Prepared statement reuse for batch execution
+
+## 📦 Installation
 
 ```toml
 [dependencies]
-markdown-sql = "0.1"
+markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 1. 创建 SQL 文件
+### 1. Create SQL File
 
 `sql/UserRepository.md`:
 
 ```markdown
-# 用户 Repository SQL
+# User Repository SQL
 
-## 公共字段
+## Common Columns
 
 ​```sql
 -- columns
 id, name, age, status, create_time
 ​```
 
-## 查询用户
+## Find User
 
 ​```sql
 -- findById
@@ -46,7 +48,7 @@ FROM user
 WHERE id = #{id}
 ​```
 
-## 条件查询
+## Conditional Query
 
 ​```sql
 -- findByCondition
@@ -57,7 +59,16 @@ WHERE 1=1
 {% if status %}AND status = #{status}{% endif %}
 ​```
 
-## 插入用户
+## IN Query
+
+​```sql
+-- findByIds
+SELECT {% include "columns" %}
+FROM user
+WHERE id IN ({{ ids | bind_join(",") }})
+​```
+
+## Insert User
 
 ​```sql
 -- insert
@@ -66,62 +77,114 @@ VALUES (#{name}, #{age}, #{status})
 ​```
 ```
 
-### 2. 定义 Repository
+### 2. Use SqlManager
 
 ```rust
-use markdown_sql::repository;
-use sqlx::FromRow;
+use markdown_sql::{DbType, ParamExtractor, SqlManager};
+use serde_json::json;
 
-#[derive(Debug, FromRow)]
-pub struct User {
-    pub id: i64,
-    pub name: String,
-    pub age: i32,
-    pub status: i32,
-    pub create_time: String,
-}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Create SQL manager
+    let mut manager = SqlManager::builder()
+        .db_type(DbType::Postgres)
+        .debug(true)
+        .build()?;
 
-#[repository(sql_file = "sql/UserRepository.md")]
-pub trait UserRepository {
-    async fn find_by_id(&self, id: i64) -> Option<User>;
-    async fn find_by_condition(&self, name: Option<String>, status: Option<i32>) -> Vec<User>;
-    async fn insert(&self, name: &str, age: i32, status: i32) -> u64;
-}
-```
+    // 2. Load SQL file
+    manager.load_file("sql/UserRepository.md")?;
 
-### 3. 使用
+    // 3. Render SQL
+    let sql = manager.render("findById", &json!({"id": 1}))?;
+    // Output: SELECT id, name, age, status, create_time FROM user WHERE id = #{id}
 
-```rust
-use sqlx::PgPool;
+    // 4. Extract parameters
+    let result = ParamExtractor::extract(&sql, DbType::Postgres);
+    // result.sql: "SELECT ... WHERE id = $1"
+    // result.params: ["id"]
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pool = PgPool::connect("postgres://...").await?;
-    
-    let user_repo = UserRepositoryImpl::new(&pool);
-    
-    // 查询单个用户
-    if let Some(user) = user_repo.find_by_id(&pool, 1).await? {
-        println!("用户: {:?}", user);
-    }
-    
-    // 条件查询
-    let users = user_repo.find_by_condition(
-        &pool,
-        Some("张%".to_string()),
-        Some(1),
-    ).await?;
-    
-    // 插入
-    let affected = user_repo.insert(&pool, "新用户", 25, 1).await?;
-    
+    // 5. Dynamic SQL
+    let sql = manager.render("findByCondition", &json!({
+        "name": "%test%",
+        "status": 1
+    }))?;
+    // Output: SELECT ... WHERE 1=1 AND name LIKE #{name} AND status = #{status}
+
+    // 6. IN query
+    let sql = manager.render("findByIds", &json!({"ids": [1, 2, 3]}))?;
+    // Output: SELECT ... WHERE id IN (#{__bind_0},#{__bind_1},#{__bind_2})
+
     Ok(())
 }
 ```
 
-## 📖 文档
+## 📝 SQL Syntax
 
-详细文档请查看 [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)
+### Parameter Binding
+
+```sql
+-- Use #{param} syntax, auto-converts to $1 (Postgres) or ? (MySQL/SQLite)
+SELECT * FROM user WHERE id = #{id} AND name = #{name}
+```
+
+### Dynamic SQL
+
+```sql
+-- Conditionals
+{% if name %}AND name = #{name}{% endif %}
+
+-- Loops
+{% for status in statuses %}
+  #{status}{% if not loop.last %},{% endif %}
+{% endfor %}
+```
+
+### SQL Fragment Reuse
+
+```sql
+-- Define fragment
+-- columns
+id, name, age, status
+
+-- Reference fragment
+SELECT {% include "columns" %} FROM user
+```
+
+### IN Query
+
+```sql
+-- Use bind_join filter to safely expand lists
+WHERE id IN ({{ ids | bind_join(",") }})
+```
+
+## 🔒 Security Checks
+
+Compile-time detection of unsafe SQL patterns:
+
+| Syntax | Status | Description |
+|--------|--------|-------------|
+| `#{param}` | ✅ Safe | Parameter binding |
+| `{{ list \| bind_join(",") }}` | ✅ Safe | IN query |
+| `{% if %}` / `{% for %}` | ✅ Safe | Dynamic logic |
+| `{{ param }}` | ❌ Compile Error | SQL injection risk |
+| `{{ list \| join(",") }}` | ❌ Compile Error | SQL injection risk |
+| `{{ param \| raw_safe }}` | ⚠️ Exempt | Explicitly declared safe |
+
+## 🗄️ Multi-Database Support
+
+```rust
+// PostgreSQL: #{id} → $1
+let result = ParamExtractor::extract(&sql, DbType::Postgres);
+
+// MySQL: #{id} → ?
+let result = ParamExtractor::extract(&sql, DbType::Mysql);
+
+// SQLite: #{id} → ?
+let result = ParamExtractor::extract(&sql, DbType::Sqlite);
+```
+
+## 📖 Documentation
+
+For detailed design documentation, see [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)
 
 ## 📜 License
 
