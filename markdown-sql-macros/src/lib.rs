@@ -312,7 +312,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
         ReturnKind::List(inner_ty) => {
             if param_names.is_empty() {
                 quote! {
-                    markdown_sql::query_list::<#inner_ty, _>(
+                    markdown_sql::query_list::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -322,7 +322,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
             } else if param_names.len() == 1 {
                 let param = &param_names[0];
                 quote! {
-                    markdown_sql::query_list::<#inner_ty, _>(
+                    markdown_sql::query_list::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -339,7 +339,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
                     })
                     .collect();
                 quote! {
-                    markdown_sql::query_list::<#inner_ty, _>(
+                    markdown_sql::query_list::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -351,7 +351,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
         ReturnKind::Optional(inner_ty) => {
             if param_names.is_empty() {
                 quote! {
-                    markdown_sql::query_optional::<#inner_ty, _>(
+                    markdown_sql::query_optional::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -361,7 +361,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
             } else if param_names.len() == 1 {
                 let param = &param_names[0];
                 quote! {
-                    markdown_sql::query_optional::<#inner_ty, _>(
+                    markdown_sql::query_optional::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -377,7 +377,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
                     })
                     .collect();
                 quote! {
-                    markdown_sql::query_optional::<#inner_ty, _>(
+                    markdown_sql::query_optional::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -389,7 +389,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
         ReturnKind::One(inner_ty) => {
             if param_names.is_empty() {
                 quote! {
-                    markdown_sql::query_one::<#inner_ty, _>(
+                    markdown_sql::query_one::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -399,7 +399,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
             } else if param_names.len() == 1 {
                 let param = &param_names[0];
                 quote! {
-                    markdown_sql::query_one::<#inner_ty, _>(
+                    markdown_sql::query_one::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -415,7 +415,7 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
                     })
                     .collect();
                 quote! {
-                    markdown_sql::query_one::<#inner_ty, _>(
+                    markdown_sql::query_one::<#inner_ty, _, _>(
                         &self.manager,
                         db,
                         #sql_id,
@@ -515,9 +515,9 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
     };
 
     quote! {
-        pub #async_token fn #method_name(
+        pub #async_token fn #method_name<D: markdown_sql::DbPool>(
             &self,
-            db: &sqlx::Pool<sqlx::Sqlite>,
+            db: &D,
             #(#param_defs),*
         ) #return_type {
             #body
@@ -540,13 +540,14 @@ fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
 /// pub trait UserRepository {
 ///     // 方法名自动映射到 SQL ID（snake_case → camelCase）
 ///     // find_by_id → findById
-///     async fn find_by_id(&self, db: &Pool<Sqlite>, params: &IdParams) -> Result<Option<User>>;
+///     // db 参数接受任何实现 DbPool 的类型
+///     async fn find_by_id(&self, db: &impl DbPool, params: &IdParams) -> Result<Option<User>>;
 ///
 ///     // 无参数查询
-///     async fn get_count(&self, db: &Pool<Sqlite>) -> Result<i64>;
+///     async fn get_count(&self, db: &impl DbPool) -> Result<i64>;
 ///
 ///     // 返回列表
-///     async fn find_all(&self, db: &Pool<Sqlite>) -> Result<Vec<User>>;
+///     async fn find_all(&self, db: &impl DbPool) -> Result<Vec<User>>;
 ///
 ///     // 返回影响行数
 ///     async fn insert(&self, db: &Pool<Sqlite>, user: &User) -> Result<u64>;

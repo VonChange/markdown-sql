@@ -86,6 +86,7 @@
 //! - `{{ list | bind_join(",") }}` - IN 查询展开
 //! - `{{ value | raw_safe }}` - 显式声明安全的字符串拼接
 
+pub mod database;
 pub mod error;
 pub mod executor;
 pub mod manager;
@@ -99,6 +100,9 @@ pub use executor::{BatchExecutor, ExecuteContext, ParamBinder, SqlExecutor, Time
 pub use manager::{init, render, set_db_type, set_debug, SqlManager, SqlManagerBuilder};
 pub use param_extractor::{DbType, ParamExtractor, SqlResult};
 pub use parser::{MarkdownParser, SqlBlock};
+
+// 数据库抽象
+pub use database::DbPool;
 
 // Repository 辅助函数
 pub use repository::{

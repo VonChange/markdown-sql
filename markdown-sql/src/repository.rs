@@ -7,12 +7,14 @@
 //! - 渲染 SQL 模板
 //! - 从 serde_json::Value 动态绑定参数
 //! - 支持多种返回类型（Vec、Option、标量、影响行数）
+//! - 使用 DbPool trait 抽象数据库连接
 
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::sqlite::{SqliteArguments, SqliteRow};
-use sqlx::{Arguments, FromRow, Pool, Row, Sqlite};
+use sqlx::{Arguments, FromRow, Row};
 
+use crate::database::DbPool;
 use crate::error::{MarkdownSqlError, Result};
 use crate::manager::SqlManager;
 use crate::param_extractor::ParamExtractor;
@@ -28,15 +30,22 @@ pub trait Repository {
 /// 查询列表
 ///
 /// 返回 `Vec<T>`
-pub async fn query_list<T, P>(
+///
+/// ## 参数
+/// - `manager`: SQL 管理器
+/// - `db`: 实现了 DbPool trait 的数据库连接
+/// - `sql_id`: SQL ID
+/// - `params`: 查询参数（实现 Serialize）
+pub async fn query_list<T, P, D>(
     manager: &SqlManager,
-    pool: &Pool<Sqlite>,
+    db: &D,
     sql_id: &str,
     params: &P,
 ) -> Result<Vec<T>>
 where
     T: for<'r> FromRow<'r, SqliteRow> + Send + Unpin,
     P: Serialize,
+    D: DbPool,
 {
     let (sql, param_names, json_value) = prepare_sql(manager, sql_id, params)?;
 
@@ -45,7 +54,7 @@ where
 
     // 执行查询
     let rows = sqlx::query_as_with::<_, T, _>(&sql, args)
-        .fetch_all(pool)
+        .fetch_all(db.pool())
         .await
         .map_err(MarkdownSqlError::from)?;
 
@@ -55,21 +64,22 @@ where
 /// 查询单条（可选）
 ///
 /// 返回 `Option<T>`
-pub async fn query_optional<T, P>(
+pub async fn query_optional<T, P, D>(
     manager: &SqlManager,
-    pool: &Pool<Sqlite>,
+    db: &D,
     sql_id: &str,
     params: &P,
 ) -> Result<Option<T>>
 where
     T: for<'r> FromRow<'r, SqliteRow> + Send + Unpin,
     P: Serialize,
+    D: DbPool,
 {
     let (sql, param_names, json_value) = prepare_sql(manager, sql_id, params)?;
     let args = build_arguments(&param_names, &json_value)?;
 
     let row = sqlx::query_as_with::<_, T, _>(&sql, args)
-        .fetch_optional(pool)
+        .fetch_optional(db.pool())
         .await
         .map_err(MarkdownSqlError::from)?;
 
@@ -79,21 +89,22 @@ where
 /// 查询单条（必须存在）
 ///
 /// 返回 `T`，不存在则报错
-pub async fn query_one<T, P>(
+pub async fn query_one<T, P, D>(
     manager: &SqlManager,
-    pool: &Pool<Sqlite>,
+    db: &D,
     sql_id: &str,
     params: &P,
 ) -> Result<T>
 where
     T: for<'r> FromRow<'r, SqliteRow> + Send + Unpin,
     P: Serialize,
+    D: DbPool,
 {
     let (sql, param_names, json_value) = prepare_sql(manager, sql_id, params)?;
     let args = build_arguments(&param_names, &json_value)?;
 
     let row = sqlx::query_as_with::<_, T, _>(&sql, args)
-        .fetch_one(pool)
+        .fetch_one(db.pool())
         .await
         .map_err(MarkdownSqlError::from)?;
 
@@ -103,20 +114,21 @@ where
 /// 查询标量值（如 COUNT）
 ///
 /// 返回 `i64`
-pub async fn query_scalar<P>(
+pub async fn query_scalar<P, D>(
     manager: &SqlManager,
-    pool: &Pool<Sqlite>,
+    db: &D,
     sql_id: &str,
     params: &P,
 ) -> Result<i64>
 where
     P: Serialize,
+    D: DbPool,
 {
     let (sql, param_names, json_value) = prepare_sql(manager, sql_id, params)?;
     let args = build_arguments(&param_names, &json_value)?;
 
     let row = sqlx::query_with(&sql, args)
-        .fetch_one(pool)
+        .fetch_one(db.pool())
         .await
         .map_err(MarkdownSqlError::from)?;
 
@@ -126,20 +138,21 @@ where
 /// 执行更新（INSERT/UPDATE/DELETE）
 ///
 /// 返回影响行数
-pub async fn execute<P>(
+pub async fn execute<P, D>(
     manager: &SqlManager,
-    pool: &Pool<Sqlite>,
+    db: &D,
     sql_id: &str,
     params: &P,
 ) -> Result<u64>
 where
     P: Serialize,
+    D: DbPool,
 {
     let (sql, param_names, json_value) = prepare_sql(manager, sql_id, params)?;
     let args = build_arguments(&param_names, &json_value)?;
 
     let result = sqlx::query_with(&sql, args)
-        .execute(pool)
+        .execute(db.pool())
         .await
         .map_err(MarkdownSqlError::from)?;
 
