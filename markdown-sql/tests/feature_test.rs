@@ -276,6 +276,135 @@ async fn test_in_query() {
     println!("✅ IN 查询测试通过");
 }
 
+/// 对象参数查询示例
+/// 
+/// 展示如何使用对象作为查询参数：
+/// - 单字段对象（IdParams）
+/// - 多字段查询对象（UserQuery）
+/// - 插入/更新对象（UserInsert/UserUpdate）
+#[tokio::test]
+async fn test_object_params_query() {
+    let db = setup_database().await;
+    let repo = get_repo();
+
+    // ========================================
+    // 1. 插入：使用对象参数
+    // ========================================
+    let insert_params = UserInsert {
+        name: "张三".to_string(),
+        age: 25,
+        email: Some("zhangsan@test.com".to_string()),
+        status: 1,
+    };
+    repo.insert(&db, &insert_params).await.expect("插入失败");
+
+    let insert_params2 = UserInsert {
+        name: "李四".to_string(),
+        age: 30,
+        email: None,
+        status: 1,
+    };
+    repo.insert(&db, &insert_params2).await.expect("插入失败");
+
+    let insert_params3 = UserInsert {
+        name: "王五".to_string(),
+        age: 20,
+        email: Some("wangwu@test.com".to_string()),
+        status: 0, // 非激活
+    };
+    repo.insert(&db, &insert_params3).await.expect("插入失败");
+
+    // ========================================
+    // 2. 单字段对象查询：IdParams
+    // ========================================
+    let id_params = IdParams { id: 1 };
+    let user = repo.find_by_id(&db, &id_params)
+        .await
+        .expect("查询失败")
+        .expect("用户不存在");
+    assert_eq!(user.name, "张三");
+
+    // ========================================
+    // 3. 多字段对象查询：UserQuery
+    // ========================================
+    
+    // 3.1 按状态查询
+    let query_by_status = UserQuery {
+        name: None,
+        status: Some(1),
+        min_age: None,
+    };
+    let active_users = repo.find_by_condition(&db, &query_by_status)
+        .await
+        .expect("查询失败");
+    assert_eq!(active_users.len(), 2, "激活用户应该有 2 个");
+
+    // 3.2 按年龄查询
+    let query_by_age = UserQuery {
+        name: None,
+        status: None,
+        min_age: Some(25),
+    };
+    let older_users = repo.find_by_condition(&db, &query_by_age)
+        .await
+        .expect("查询失败");
+    assert_eq!(older_users.len(), 2, ">= 25 岁应该有 2 个");
+
+    // 3.3 组合条件查询
+    let combined_query = UserQuery {
+        name: None,
+        status: Some(1),
+        min_age: Some(26),
+    };
+    let filtered_users = repo.find_by_condition(&db, &combined_query)
+        .await
+        .expect("查询失败");
+    assert_eq!(filtered_users.len(), 1, "激活且 >= 26 岁应该有 1 个");
+    assert_eq!(filtered_users[0].name, "李四");
+
+    // ========================================
+    // 4. 列表对象查询：IdsParams
+    // ========================================
+    let ids_params = IdsParams { ids: vec![1, 3] };
+    let users_by_ids = repo.find_by_ids(&db, &ids_params)
+        .await
+        .expect("查询失败");
+    assert_eq!(users_by_ids.len(), 2);
+
+    // ========================================
+    // 5. 更新：使用对象参数
+    // ========================================
+    let update_params = UserUpdate {
+        id: 1,
+        name: "张三（已更新）".to_string(),
+        age: 26,
+        email: Some("zhangsan_new@test.com".to_string()),
+        status: 1,
+    };
+    repo.update(&db, &update_params).await.expect("更新失败");
+
+    // 验证更新
+    let updated_user = repo.find_by_id(&db, &IdParams { id: 1 })
+        .await
+        .expect("查询失败")
+        .expect("用户不存在");
+    assert_eq!(updated_user.name, "张三（已更新）");
+    assert_eq!(updated_user.age, 26);
+
+    // ========================================
+    // 6. 统计：使用对象参数
+    // ========================================
+    let count_params = CountParams { status: Some(1) };
+    let active_count = repo.count(&db, &count_params).await.expect("统计失败");
+    assert_eq!(active_count, 2, "激活用户数应该是 2");
+
+    let all_count_params = CountParams { status: None };
+    let total_count = repo.count(&db, &all_count_params).await.expect("统计失败");
+    assert_eq!(total_count, 3, "总用户数应该是 3");
+
+    println!("✅ 对象参数查询示例测试通过");
+}
+
 #[tokio::test]
 async fn test_update() {
     let db = setup_database().await;

@@ -49,7 +49,7 @@ impl MarkdownParser {
         let path = path.as_ref();
         let content = fs::read_to_string(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                MarkdownSqlError::FileNotFound(path.display().to_string())
+                MarkdownSqlError::file_not_found(path.display().to_string())
             } else {
                 MarkdownSqlError::IoError(e)
             }

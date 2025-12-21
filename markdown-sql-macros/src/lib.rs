@@ -166,6 +166,25 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
+/// 将 snake_case 转换为 PascalCase（用于结构体名）
+fn to_pascal_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = true; // 首字母大写
+
+    for c in s.chars() {
+        if c == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(c.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
 /// 检查 SQL 文件安全性
 fn check_sql_file_safety(sql_file: &str) -> Result<(), String> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
@@ -344,7 +363,64 @@ fn parse_methods(trait_item: &ItemTrait) -> Vec<MethodInfo> {
     methods
 }
 
-/// 生成方法实现
+/// 生成参数表达式
+///
+/// - 0 个参数：使用 EmptyParams
+/// - 1 个参数：直接传递
+/// - 多个参数：生成内部结构体（避免使用 json!）
+fn build_params_code(
+    method: &MethodInfo,
+) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+    let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
+
+    if param_names.is_empty() {
+        // 无参数
+        (quote! {}, quote! { &markdown_sql::EmptyParams })
+    } else if param_names.len() == 1 {
+        // 单参数：直接传递
+        let param = &param_names[0];
+        (quote! {}, quote! { #param })
+    } else {
+        // 多参数：生成内部结构体
+        // 结构体名：__方法名Params（避免命名冲突）
+        let struct_name = format_ident!("__{}Params", to_pascal_case(&method.name.to_string()));
+
+        // 生成字段定义（保留原始类型，支持引用）
+        let field_defs: Vec<_> = method
+            .params
+            .iter()
+            .map(|(name, ty, _)| {
+                quote! { #name: #ty }
+            })
+            .collect();
+
+        // 生成字段赋值
+        let field_assigns: Vec<_> = param_names
+            .iter()
+            .map(|name| {
+                quote! { #name }
+            })
+            .collect();
+
+        // 结构体定义（局部作用域内）
+        let struct_def = quote! {
+            #[derive(serde::Serialize)]
+            struct #struct_name<'__p> {
+                #[serde(skip)]
+                __marker: std::marker::PhantomData<&'__p ()>,
+                #(#field_defs,)*
+            }
+            let __params = #struct_name {
+                __marker: std::marker::PhantomData,
+                #(#field_assigns,)*
+            };
+        };
+
+        (struct_def, quote! { &__params })
+    }
+}
+
+/// 生成方法实现（简化版，使用 build_params_code）
 fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
     let method_name = &method.name;
     let sql_id = &method.sql_id;
@@ -360,210 +436,73 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2:
         })
         .collect();
 
-    // 生成参数传递（用于构造参数结构体或直接传递）
-    let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
-
     // 生成返回类型
     let return_type = method.return_type.as_ref().map(|ty| quote! { -> #ty });
 
-    // 根据返回类型生成不同的实现
-    let body = match &method.return_kind {
+    // 构建参数代码
+    let (params_struct, params_expr) = build_params_code(method);
+
+    // 根据返回类型生成调用代码
+    let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
-            if param_names.is_empty() {
-                quote! {
-                    #internal_mod::query_list::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &markdown_sql::EmptyParams,
-                    ).await.map_err(|e| e.into())
-                }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! {
-                    #internal_mod::query_list::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        #param,
-                    ).await.map_err(|e| e.into())
-                }
-            } else {
-                // 多个参数，使用 serde_json::json! 构造
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! {
-                    #internal_mod::query_list::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &serde_json::json!({ #(#json_fields),* }),
-                    ).await.map_err(|e| e.into())
-                }
+            quote! {
+                #internal_mod::query_list::<#inner_ty, _, _>(
+                    &self.manager,
+                    db,
+                    #sql_id,
+                    #params_expr,
+                ).await.map_err(|e| e.into())
             }
         }
         ReturnKind::Optional(inner_ty) => {
-            if param_names.is_empty() {
-                quote! {
-                    #internal_mod::query_optional::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &markdown_sql::EmptyParams,
-                    ).await.map_err(|e| e.into())
-                }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! {
-                    #internal_mod::query_optional::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        #param,
-                    ).await.map_err(|e| e.into())
-                }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! {
-                    #internal_mod::query_optional::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &serde_json::json!({ #(#json_fields),* }),
-                    ).await.map_err(|e| e.into())
-                }
+            quote! {
+                #internal_mod::query_optional::<#inner_ty, _, _>(
+                    &self.manager,
+                    db,
+                    #sql_id,
+                    #params_expr,
+                ).await.map_err(|e| e.into())
             }
         }
         ReturnKind::One(inner_ty) => {
-            if param_names.is_empty() {
-                quote! {
-                    #internal_mod::query_one::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &markdown_sql::EmptyParams,
-                    ).await.map_err(|e| e.into())
-                }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! {
-                    #internal_mod::query_one::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        #param,
-                    ).await.map_err(|e| e.into())
-                }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! {
-                    #internal_mod::query_one::<#inner_ty, _, _>(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &serde_json::json!({ #(#json_fields),* }),
-                    ).await.map_err(|e| e.into())
-                }
+            quote! {
+                #internal_mod::query_one::<#inner_ty, _, _>(
+                    &self.manager,
+                    db,
+                    #sql_id,
+                    #params_expr,
+                ).await.map_err(|e| e.into())
             }
         }
         ReturnKind::Scalar => {
-            if param_names.is_empty() {
-                quote! {
-                    #internal_mod::query_scalar(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &markdown_sql::EmptyParams,
-                    ).await.map_err(|e| e.into())
-                }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! {
-                    #internal_mod::query_scalar(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        #param,
-                    ).await.map_err(|e| e.into())
-                }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! {
-                    #internal_mod::query_scalar(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &serde_json::json!({ #(#json_fields),* }),
-                    ).await.map_err(|e| e.into())
-                }
+            quote! {
+                #internal_mod::query_scalar(
+                    &self.manager,
+                    db,
+                    #sql_id,
+                    #params_expr,
+                ).await.map_err(|e| e.into())
             }
         }
         ReturnKind::Affected => {
-            if param_names.is_empty() {
-                quote! {
-                    #internal_mod::execute(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &markdown_sql::EmptyParams,
-                    ).await.map_err(|e| e.into())
-                }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! {
-                    #internal_mod::execute(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        #param,
-                    ).await.map_err(|e| e.into())
-                }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! {
-                    #internal_mod::execute(
-                        &self.manager,
-                        db,
-                        #sql_id,
-                        &serde_json::json!({ #(#json_fields),* }),
-                    ).await.map_err(|e| e.into())
-                }
+            quote! {
+                #internal_mod::execute(
+                    &self.manager,
+                    db,
+                    #sql_id,
+                    #params_expr,
+                ).await.map_err(|e| e.into())
             }
         }
         ReturnKind::Unit => {
-            quote! {
-                Ok(())
-            }
+            quote! { Ok(()) }
         }
+    };
+
+    // 组合最终方法体
+    let body = quote! {
+        #params_struct
+        #call_expr
     };
 
     // 生成异步标记
@@ -621,11 +560,12 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2:
 fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
     let sql_id = &method.sql_id;
     let internal_mod = db_type.internal_module();
-    let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
 
-    match &method.return_kind {
+    // 构建参数代码（使用结构体）
+    let (params_struct, params_expr) = build_params_code(method);
+
+    let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
-            let params_expr = build_params_expr(&param_names);
             quote! {
                 #internal_mod::query_list_tx::<#inner_ty, _>(
                     &self.manager,
@@ -636,7 +576,6 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
             }
         }
         ReturnKind::Optional(inner_ty) => {
-            let params_expr = build_params_expr(&param_names);
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_optional_tx::<#inner_ty, _>(
@@ -658,7 +597,6 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
             }
         }
         ReturnKind::One(inner_ty) => {
-            let params_expr = build_params_expr(&param_names);
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_one_tx::<#inner_ty, _>(
@@ -676,12 +614,11 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
                         #params_expr,
                     ).await.map_err(|e| e.into())?;
                     result.into_iter().next()
-                        .ok_or_else(|| markdown_sql::MarkdownSqlError::NotFound("记录不存在".into()))
+                        .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
                 },
             }
         }
         ReturnKind::Scalar => {
-            let params_expr = build_params_expr(&param_names);
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_scalar_tx(
@@ -692,14 +629,14 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
                     ).await.map_err(|e| e.into())
                 },
                 _ => quote! {
-                    Err(markdown_sql::MarkdownSqlError::NotSupported(
-                        "事务中的标量查询暂不支持此数据库".into()
+                    Err(markdown_sql::MarkdownSqlError::not_supported(
+                        "query_scalar_tx",
+                        "事务中的标量查询暂不支持此数据库"
                     ))
                 },
             }
         }
         ReturnKind::Affected => {
-            let params_expr = build_params_expr(&param_names);
             quote! {
                 #internal_mod::execute_tx(
                     &self.manager,
@@ -712,29 +649,16 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
         ReturnKind::Unit => {
             quote! { Ok(()) }
         }
+    };
+
+    // 组合参数结构体和调用
+    quote! {
+        #params_struct
+        #call_expr
     }
 }
 
-/// 构建参数表达式
-fn build_params_expr(param_names: &[&Ident]) -> proc_macro2::TokenStream {
-    if param_names.is_empty() {
-        quote! { &markdown_sql::EmptyParams }
-    } else if param_names.len() == 1 {
-        let param = &param_names[0];
-        quote! { #param }
-    } else {
-        let json_fields: Vec<_> = param_names
-            .iter()
-            .map(|name| {
-                let key = name.to_string();
-                quote! { #key: #name }
-            })
-            .collect();
-        quote! { &serde_json::json!({ #(#json_fields),* }) }
-    }
-}
-
-/// 生成事务版本方法实现（方法名_tx）
+/// 生成事务版本方法实现（方法名_tx）- 简化版
 fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
     let method_name = &method.name;
     let tx_method_name = format_ident!("{}_tx", method_name);
@@ -750,30 +674,15 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
         })
         .collect();
 
-    // 生成参数传递
-    let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
-
     // 生成返回类型
     let return_type = method.return_type.as_ref().map(|ty| quote! { -> #ty });
 
-    // 根据返回类型生成不同的实现（使用 _tx 版本函数）
-    let body = match &method.return_kind {
+    // 构建参数代码（使用结构体）
+    let (params_struct, params_expr) = build_params_code(method);
+
+    // 根据返回类型生成调用代码
+    let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
-            let params_expr = if param_names.is_empty() {
-                quote! { &markdown_sql::EmptyParams }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! { #param }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! { &serde_json::json!({ #(#json_fields),* }) }
-            };
             quote! {
                 #internal_mod::query_list_tx::<#inner_ty, _>(
                     &self.manager,
@@ -784,22 +693,6 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
             }
         }
         ReturnKind::Optional(inner_ty) => {
-            let params_expr = if param_names.is_empty() {
-                quote! { &markdown_sql::EmptyParams }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! { #param }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! { &serde_json::json!({ #(#json_fields),* }) }
-            };
-            // SQLite 有 query_optional_tx，MySQL/PG 用 query_list_tx
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_optional_tx::<#inner_ty, _>(
@@ -821,21 +714,6 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
             }
         }
         ReturnKind::One(inner_ty) => {
-            let params_expr = if param_names.is_empty() {
-                quote! { &markdown_sql::EmptyParams }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! { #param }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! { &serde_json::json!({ #(#json_fields),* }) }
-            };
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_one_tx::<#inner_ty, _>(
@@ -853,26 +731,11 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
                         #params_expr,
                     ).await.map_err(|e| e.into())?;
                     result.into_iter().next()
-                        .ok_or_else(|| markdown_sql::MarkdownSqlError::NotFound("记录不存在".into()))
+                        .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
                 },
             }
         }
         ReturnKind::Scalar => {
-            let params_expr = if param_names.is_empty() {
-                quote! { &markdown_sql::EmptyParams }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! { #param }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! { &serde_json::json!({ #(#json_fields),* }) }
-            };
             match db_type {
                 DbTypeArg::Sqlite => quote! {
                     #internal_mod::query_scalar_tx(
@@ -884,28 +747,14 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
                 },
                 _ => quote! {
                     // MySQL/PG 暂不支持 query_scalar_tx
-                    Err(markdown_sql::MarkdownSqlError::NotSupported(
-                        "事务中的标量查询暂不支持此数据库".into()
+                    Err(markdown_sql::MarkdownSqlError::not_supported(
+                        "query_scalar_tx",
+                        "事务中的标量查询暂不支持此数据库"
                     ))
                 },
             }
         }
         ReturnKind::Affected => {
-            let params_expr = if param_names.is_empty() {
-                quote! { &markdown_sql::EmptyParams }
-            } else if param_names.len() == 1 {
-                let param = &param_names[0];
-                quote! { #param }
-            } else {
-                let json_fields: Vec<_> = param_names
-                    .iter()
-                    .map(|name| {
-                        let key = name.to_string();
-                        quote! { #key: #name }
-                    })
-                    .collect();
-                quote! { &serde_json::json!({ #(#json_fields),* }) }
-            };
             quote! {
                 #internal_mod::execute_tx(
                     &self.manager,
@@ -916,10 +765,14 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macr
             }
         }
         ReturnKind::Unit => {
-            quote! {
-                Ok(())
-            }
+            quote! { Ok(()) }
         }
+    };
+
+    // 组合参数结构体和调用
+    let body = quote! {
+        #params_struct
+        #call_expr
     };
 
     // 生成异步标记

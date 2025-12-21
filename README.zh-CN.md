@@ -562,6 +562,152 @@ let manager = SqlManager::builder()
 
 > **注意**：`db_type` 参数支持 `"sqlite"`、`"mysql"`、`"postgres"`（或 `"postgresql"`、`"pg"`）。
 
+## 📋 参数传递规范
+
+### 推荐方式
+
+**1. 无参数**：
+
+```rust
+async fn find_all(&self) -> Result<Vec<User>, MarkdownSqlError>;
+```
+
+**2. 单参数对象（推荐）**：
+
+```rust
+#[derive(Serialize)]
+pub struct IdParams { pub id: i64 }
+
+async fn find_by_id(&self, params: &IdParams) -> Result<Option<User>, MarkdownSqlError>;
+
+// 使用
+let params = IdParams { id: 1 };
+let user = repo.find_by_id(&db, &params).await?;
+```
+
+**3. 多条件查询对象（推荐）**：
+
+```rust
+#[derive(Serialize)]
+pub struct UserQuery {
+    pub name: Option<String>,
+    pub status: Option<i32>,
+    pub min_age: Option<i32>,
+}
+
+async fn find_by_condition(&self, params: &UserQuery) -> Result<Vec<User>, MarkdownSqlError>;
+
+// 使用：按状态查询
+let query = UserQuery {
+    name: None,
+    status: Some(1),
+    min_age: None,
+};
+let users = repo.find_by_condition(&db, &query).await?;
+
+// 使用：组合条件查询
+let query = UserQuery {
+    name: Some("张%".to_string()),  // LIKE 模糊匹配
+    status: Some(1),
+    min_age: Some(18),
+};
+let users = repo.find_by_condition(&db, &query).await?;
+```
+
+**4. 插入/更新对象**：
+
+```rust
+#[derive(Serialize)]
+pub struct UserInsert {
+    pub name: String,
+    pub age: i32,
+    pub email: Option<String>,
+    pub status: i32,
+}
+
+async fn insert(&self, params: &UserInsert) -> Result<u64, MarkdownSqlError>;
+
+// 使用
+let user = UserInsert {
+    name: "张三".to_string(),
+    age: 25,
+    email: Some("zhangsan@test.com".to_string()),
+    status: 1,
+};
+repo.insert(&db, &user).await?;
+```
+
+**5. 列表参数对象（IN 查询）**：
+
+```rust
+#[derive(Serialize)]
+pub struct IdsParams {
+    pub ids: Vec<i64>,
+}
+
+async fn find_by_ids(&self, params: &IdsParams) -> Result<Vec<User>, MarkdownSqlError>;
+
+// 使用
+let params = IdsParams { ids: vec![1, 3, 5] };
+let users = repo.find_by_ids(&db, &params).await?;
+```
+
+### 对应 SQL 示例
+
+```sql
+-- findByCondition
+SELECT * FROM users
+WHERE 1=1
+{% if name %}AND name LIKE #{name}{% endif %}
+{% if status %}AND status = #{status}{% endif %}
+{% if min_age %}AND age >= #{min_age}{% endif %}
+ORDER BY id
+
+-- findByIds
+SELECT * FROM users
+WHERE id IN ({{ ids | bind_join(",") }})
+```
+
+### 禁止方式
+
+```rust
+// ❌ 禁止：使用 serde_json::json!()
+let params = serde_json::json!({ "name": name });
+
+// ❌ 禁止：使用 HashMap
+let mut params = HashMap::new();
+```
+
+## 📋 错误类型
+
+框架提供细粒度的错误类型便于精准处理：
+
+| 错误类型 | 说明 |
+|---------|------|
+| `FileNotFound` | SQL 文件未找到 |
+| `SqlNotFound` | sqlId 不存在 |
+| `ParamMissing` | 模板参数缺失 |
+| `RenderError` | 模板渲染失败 |
+| `SqlxError` | 数据库执行错误 |
+| `TransactionError` | 事务操作失败 |
+| `NotFound` | 记录不存在（query_one） |
+| `UnsafeSql` | 编译时安全检查失败 |
+
+```rust
+use markdown_sql::MarkdownSqlError;
+
+match result {
+    Err(MarkdownSqlError::NotFound { sql_id }) => {
+        HttpResponse::NotFound().body(format!("未找到: {}", sql_id))
+    }
+    Err(MarkdownSqlError::SqlxError(e)) => {
+        tracing::error!("数据库错误: {}", e);
+        HttpResponse::InternalServerError().finish()
+    }
+    Ok(data) => HttpResponse::Ok().json(data),
+}
+```
+
 ## 📖 文档
 
 详细设计文档请查看 [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)

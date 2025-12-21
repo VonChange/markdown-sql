@@ -462,3 +462,90 @@ let users = repo.find_all(&db).await?;
 1. 改为 `#{param}` 使用参数绑定
 2. 如果是 IN 查询，使用 `{{ list | bind_join(",") }}`
 3. 如果确定安全（值来自枚举），使用 `{{ param | raw_safe }}`
+
+---
+
+## 参数传递规范
+
+### ✅ 推荐方式
+
+**1. 无参数**：直接调用
+```rust
+async fn find_all(&self) -> Result<Vec<User>, MarkdownSqlError>;
+```
+
+**2. 单参数**：直接传入参数对象
+```rust
+async fn find_by_id(&self, params: &IdParams) -> Result<Option<User>, MarkdownSqlError>;
+```
+
+**3. 多参数（推荐使用参数对象！）**：
+```rust
+// ✅ 推荐：定义参数结构体
+#[derive(Serialize)]
+pub struct UserSearchParams {
+    pub name: Option<String>,
+    pub status: i32,
+}
+
+async fn search(&self, params: &UserSearchParams) -> Result<Vec<User>, MarkdownSqlError>;
+```
+
+### ❌ 禁止方式
+
+```rust
+// ❌ 禁止：使用 serde_json::json!()
+let params = serde_json::json!({ "name": name, "status": status });
+repo.search(&db, &params).await?;
+
+// ❌ 禁止：使用 HashMap
+let mut params = HashMap::new();
+params.insert("name", name);
+repo.search(&db, &params).await?;
+```
+
+### 说明
+
+- 宏会自动处理多参数情况（内部生成临时结构体），但**强烈建议显式定义参数对象**
+- 参数对象便于复用、IDE 补全、类型检查
+- 太多零散参数会降低代码可读性
+
+---
+
+## 错误处理规范
+
+框架提供细粒度的错误类型：
+
+| 错误类型 | 说明 | 场景 |
+|---------|------|------|
+| `FileNotFound` | 文件未找到 | SQL 文件不存在 |
+| `SqlNotFound` | SQL 未找到 | sqlId 不存在 |
+| `ParamMissing` | 参数缺失 | 模板需要的参数未提供 |
+| `RenderError` | 渲染错误 | 模板渲染失败 |
+| `SqlxError` | SQL 执行错误 | 数据库操作失败 |
+| `TransactionError` | 事务错误 | 事务操作失败 |
+| `NotFound` | 记录不存在 | query_one 返回空 |
+| `UnsafeSql` | 安全检查失败 | 检测到不安全语法 |
+
+### 错误使用示例
+
+```rust
+use markdown_sql::MarkdownSqlError;
+
+match result {
+    Err(MarkdownSqlError::NotFound { sql_id }) => {
+        // 记录不存在，返回 404
+        HttpResponse::NotFound().body(format!("未找到记录: {}", sql_id))
+    }
+    Err(MarkdownSqlError::SqlxError(e)) => {
+        // 数据库错误，记录日志
+        tracing::error!("数据库错误: {}", e);
+        HttpResponse::InternalServerError().finish()
+    }
+    Err(e) => {
+        // 其他错误
+        HttpResponse::InternalServerError().body(e.to_string())
+    }
+    Ok(data) => HttpResponse::Ok().json(data),
+}
+```

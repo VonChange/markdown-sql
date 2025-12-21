@@ -202,10 +202,10 @@ impl SqlManager {
             // 只处理 .md 文件
             if path.extension().map_or(false, |ext| ext == "md") {
                 let content = entry.contents_utf8().ok_or_else(|| {
-                    MarkdownSqlError::InvalidPath(format!(
-                        "文件 {} 不是有效的 UTF-8",
-                        path.display()
-                    ))
+                    MarkdownSqlError::InvalidPath {
+                        path: path.display().to_string(),
+                        reason: "文件不是有效的 UTF-8".to_string(),
+                    }
                 })?;
 
                 let namespace = path
@@ -295,13 +295,13 @@ impl SqlManager {
         let env = self.create_env();
         
         let template = env.get_template(sql_id).map_err(|_| {
-            MarkdownSqlError::SqlNotFound(sql_id.to_string())
+            MarkdownSqlError::sql_not_found(sql_id, "未知")
         })?;
 
         let context = Value::from_serialize(params);
         let rendered = template
             .render(&context)
-            .map_err(|e| MarkdownSqlError::RenderError(e.to_string()))?;
+            .map_err(|e| MarkdownSqlError::render_error(sql_id, e.to_string()))?;
 
         // 清理多余空白行
         let cleaned = Self::clean_sql(&rendered);
