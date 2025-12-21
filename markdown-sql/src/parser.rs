@@ -5,17 +5,17 @@
 //!
 //! ## SQL 格式
 //!
-//! ```markdown
-//! ## 查询用户
+//! SQL ID 在代码块第一行，以 `-- sqlId` 格式定义。
+//! 代码块使用 \`\`\` 或 \`\`\`sql 标记。
 //!
-//! ```sql
+//! 示例:
+//!
+//! ```text
+//! \`\`\`sql
 //! -- findById
 //! SELECT * FROM user WHERE id = #{id}
+//! \`\`\`
 //! ```
-//! ```
-//!
-//! - SQL ID 在代码块第一行，以 `-- sqlId` 格式定义
-//! - 代码块使用 ``` 或 ```sql 标记
 
 use std::collections::HashMap;
 use std::fs;

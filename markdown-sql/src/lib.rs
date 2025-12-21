@@ -16,13 +16,13 @@
 //!
 //! `sql/UserRepository.md`:
 //!
-//! ```markdown
+//! ```text
 //! ## 查询用户
 //!
-//! ```sql
+//! \`\`\`sql
 //! -- findById
 //! SELECT * FROM user WHERE id = #{id}
-//! ```
+//! \`\`\`
 //! ```
 //!
 //! ### 2. 加载并使用
@@ -53,31 +53,31 @@
 //!
 //! 使用 MiniJinja 模板语法：
 //!
-//! ```markdown
-//! ```sql
+//! ```text
+//! \`\`\`sql
 //! -- findByCondition
 //! SELECT * FROM user
 //! WHERE 1=1
 //! {% if name %}AND name LIKE #{name}{% endif %}
 //! {% if status %}AND status = #{status}{% endif %}
-//! ```
+//! \`\`\`
 //! ```
 //!
 //! ## SQL 复用
 //!
 //! 使用 `{% include %}` 引用其他 SQL 片段：
 //!
-//! ```markdown
-//! ```sql
+//! ```text
+//! \`\`\`sql
 //! -- columns
 //! id, name, age
-//! ```
+//! \`\`\`
 //!
-//! ```sql
+//! \`\`\`sql
 //! -- findAll
 //! SELECT {% include "columns" %}
 //! FROM user
-//! ```
+//! \`\`\`
 //! ```
 //!
 //! ## 参数绑定

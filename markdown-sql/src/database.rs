@@ -84,17 +84,6 @@ impl<T: DbPool> DbPool for Arc<T> {
 mod tests {
     use super::*;
 
-    // 测试结构体
-    struct TestDb {
-        sqlite: Pool<Sqlite>,
-    }
-
-    impl DbPool for TestDb {
-        fn pool(&self) -> &Pool<Sqlite> {
-            &self.sqlite
-        }
-    }
-
     // 由于创建 Pool 需要实际连接，这里只测试 trait 定义是否正确
     #[test]
     fn test_trait_definition() {
