@@ -172,6 +172,64 @@ impl SqlManager {
         Ok(count)
     }
 
+    /// 从嵌入的目录加载所有 SQL 文件
+    ///
+    /// 需要启用 `embed` feature。
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// use include_dir::{include_dir, Dir};
+    /// use markdown_sql::SqlManager;
+    ///
+    /// // 编译时嵌入 sql 目录
+    /// static SQL_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/sql");
+    ///
+    /// let mut manager = SqlManager::new();
+    /// manager.load_embedded_dir(&SQL_DIR)?;
+    /// ```
+    #[cfg(feature = "embed")]
+    pub fn load_embedded_dir(&mut self, dir: &include_dir::Dir) -> Result<usize> {
+        let mut total = 0;
+
+        for entry in dir.files() {
+            let path = entry.path();
+            
+            // 只处理 .md 文件
+            if path.extension().map_or(false, |ext| ext == "md") {
+                let content = entry.contents_utf8().ok_or_else(|| {
+                    MarkdownSqlError::InvalidPath(format!(
+                        "文件 {} 不是有效的 UTF-8",
+                        path.display()
+                    ))
+                })?;
+
+                let namespace = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("default");
+
+                let count = self.load_content(content, namespace)?;
+                total += count;
+
+                if self.debug {
+                    tracing::debug!(
+                        "加载嵌入 SQL 文件: {} ({} 个 SQL)",
+                        path.display(),
+                        count
+                    );
+                }
+            }
+        }
+
+        // 递归处理子目录
+        for subdir in dir.dirs() {
+            total += self.load_embedded_dir(subdir)?;
+        }
+
+        Ok(total)
+    }
+
     /// 注册 SQL 块到模板存储
     fn register_blocks(
         &mut self,

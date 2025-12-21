@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Markdown SQL 核心库 - SQL 解析、模板渲染、执行器"
 
+[features]
+default = []
+# 启用嵌入目录支持（编译时将 SQL 文件嵌入二进制）
+embed = ["include_dir"]
+
 [dependencies]
 # 模板引擎
 minijinja = { workspace = true, features = ["loader"] }
@@ -28,6 +33,9 @@ tracing = { workspace = true }
 # 序列化
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# 嵌入目录（可选）
+include_dir = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -99,6 +99,10 @@ pub use manager::{init, render, set_db_type, set_debug, SqlManager, SqlManagerBu
 pub use param_extractor::{DbType, ParamExtractor, SqlResult};
 pub use parser::{MarkdownParser, SqlBlock};
 
+// 当启用 embed feature 时，重新导出 include_dir
+#[cfg(feature = "embed")]
+pub use include_dir::{include_dir, Dir};
+
 /// 版本号
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
