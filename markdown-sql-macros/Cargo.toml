@@ -1,0 +1,25 @@
+[package]
+name = "markdown-sql-macros"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Markdown SQL 过程宏 - #[repository] 属性宏"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# 过程宏
+syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+# 正则表达式（用于安全检查）
+regex = { workspace = true }
+
+# 全局缓存
+once_cell = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

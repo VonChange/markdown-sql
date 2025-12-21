@@ -1,0 +1,14 @@
+# Rust 编译产物
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 测试产物
+*.log

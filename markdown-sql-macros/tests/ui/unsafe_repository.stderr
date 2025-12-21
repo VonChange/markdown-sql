@@ -1,0 +1,9 @@
+error: SQL 安全检查失败，发现 1 处不安全代码:
+       [tests/sql/unsafe.md] SQL 注入风险!
+         位置: findByName 第 1 行
+         内容: {{ name }}
+         建议: 请改为: #{name} (参数绑定)
+ --> tests/ui/unsafe_repository.rs:6:11
+  |
+6 | pub trait UnsafeUserRepository {
+  |           ^^^^^^^^^^^^^^^^^^^^
