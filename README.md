@@ -182,6 +182,54 @@ let result = ParamExtractor::extract(&sql, DbType::Mysql);
 let result = ParamExtractor::extract(&sql, DbType::Sqlite);
 ```
 
+## 🤖 AI/Vibe Coding Friendly
+
+This framework is designed with AI-assisted programming in mind:
+
+### Why Markdown SQL?
+
+| Traditional Approach | markdown-sql |
+|---------------------|--------------|
+| SQL embedded in code, hard for AI to understand context | SQL in Markdown with clear structure and comments |
+| Magic strings scattered across files | Centralized, well-documented SQL files |
+| No clear relationship between SQL and business logic | Markdown headings describe intent |
+
+### AI Benefits
+
+1. **Clear Context**: SQL blocks have descriptive headings
+   ```markdown
+   ## Find active users by department
+   ​```sql
+   -- findActiveUsersByDept
+   SELECT * FROM user WHERE status = 1 AND dept_id = #{deptId}
+   ​```
+   ```
+
+2. **Self-Documenting**: AI can understand what each SQL does from the Markdown structure
+
+3. **Easy Generation**: AI can generate new SQL blocks following the established pattern
+
+4. **Safe by Default**: `#{param}` syntax prevents AI from accidentally generating SQL injection vulnerabilities
+
+5. **Reusable Fragments**: `{% include %}` helps AI understand and reuse common patterns
+
+### Vibe Coding Workflow
+
+```
+Human: "Add a query to find users by email"
+
+AI: Creates in UserRepository.md:
+
+## Find user by email
+
+​```sql
+-- findByEmail
+SELECT {% include "columns" %}
+FROM user
+WHERE email = #{email}
+​```
+```
+
 ## 📖 Documentation
 
 For detailed design documentation, see [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)

@@ -180,6 +180,60 @@ let result = ParamExtractor::extract(&sql, DbType::Mysql);
 let result = ParamExtractor::extract(&sql, DbType::Sqlite);
 ```
 
+## 🤖 AI 编程 / Vibe Coding 友好
+
+本框架在设计时充分考虑了 AI 辅助编程的场景：
+
+### 为什么用 Markdown SQL？
+
+| 传统方式 | markdown-sql |
+|---------|--------------|
+| SQL 嵌入代码中，AI 难以理解上下文 | SQL 在 Markdown 中，结构清晰有注释 |
+| 魔法字符串散落各处 | SQL 集中管理，文档化 |
+| SQL 与业务逻辑关系不明确 | Markdown 标题描述意图 |
+
+### 对 AI 的优势
+
+1. **清晰的上下文**：SQL 块有描述性标题
+   ```markdown
+   ## 按部门查询活跃用户
+   ​```sql
+   -- findActiveUsersByDept
+   SELECT * FROM user WHERE status = 1 AND dept_id = #{deptId}
+   ​```
+   ```
+
+2. **自文档化**：AI 可以从 Markdown 结构理解每个 SQL 的作用
+
+3. **易于生成**：AI 可以按照已有模式生成新的 SQL 块
+
+4. **默认安全**：`#{param}` 语法防止 AI 意外生成 SQL 注入漏洞
+
+5. **可复用片段**：`{% include %}` 帮助 AI 理解和复用通用模式
+
+### Vibe Coding 工作流
+
+```
+用户: "添加一个按邮箱查询用户的方法"
+
+AI: 在 UserRepository.md 中生成:
+
+## 按邮箱查询用户
+
+​```sql
+-- findByEmail
+SELECT {% include "columns" %}
+FROM user
+WHERE email = #{email}
+​```
+```
+
+### 设计理念
+
+- **让 AI 更好理解**：SQL 不再是散落的字符串，而是有结构、有注释的文档
+- **减少 AI 出错**：强制参数绑定，编译时安全检查
+- **提高 AI 效率**：清晰的模式让 AI 能快速学习并生成正确的代码
+
 ## 📖 文档
 
 详细设计文档请查看 [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)
