@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "markdown-sql",
     "markdown-sql-macros",
-    "examples/demo",
 ]
 
 [workspace.package]

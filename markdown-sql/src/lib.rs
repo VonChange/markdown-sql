@@ -9,6 +9,7 @@
 //! - 🎨 **动态 SQL**：使用 MiniJinja 模板语法，支持条件、循环
 //! - 🔗 **SQL 复用**：`{% include %}` 引用其他 SQL 片段
 //! - 🚀 **高性能**：启动时预编译模板，运行时零解析开销
+//! - 🗄️ **多数据库**：支持 SQLite、MySQL、PostgreSQL
 //!
 //! ## 快速开始
 //!
@@ -86,43 +87,135 @@
 //! - `{{ list | bind_join(",") }}` - IN 查询展开
 //! - `{{ value | raw_safe }}` - 显式声明安全的字符串拼接
 
-pub mod database;
+// ============================================================================
+// 核心模块
+// ============================================================================
+
 pub mod error;
 pub mod executor;
 pub mod manager;
 pub mod param_extractor;
 pub mod parser;
-pub mod repository;
 
+// ============================================================================
+// 数据库模块
+// ============================================================================
+
+pub mod db;
+
+// ============================================================================
 // 重新导出常用类型
+// ============================================================================
+
 pub use error::{MarkdownSqlError, Result};
 pub use executor::{BatchExecutor, ExecuteContext, ParamBinder, SqlExecutor, Timer};
 pub use manager::{init, render, set_db_type, set_debug, SqlManager, SqlManagerBuilder};
 pub use param_extractor::{DbType, ParamExtractor, SqlResult};
 pub use parser::{MarkdownParser, SqlBlock};
 
-// 数据库抽象
-pub use database::DbPool;
+// ============================================================================
+// 数据库抽象（按 feature 导出）
+// ============================================================================
 
-// Repository 辅助函数（Pool 版本）
-pub use repository::{
-    execute, query_list, query_one, query_optional, query_scalar, EmptyParams, Repository,
-};
+// SQLite（默认）
+#[cfg(feature = "sqlite")]
+pub use db::{DbPool, SqliteDbPool};
 
-// Repository 辅助函数（Transaction 版本）
-pub use repository::{
-    execute_tx, query_list_tx, query_one_tx, query_optional_tx, query_scalar_tx,
-};
+// MySQL
+#[cfg(feature = "mysql")]
+pub use db::MySqlDbPool;
 
-// 批量操作
-pub use repository::{batch_execute, batch_execute_tx};
+// PostgreSQL
+#[cfg(feature = "postgres")]
+pub use db::PgDbPool;
 
-// 事务辅助
-pub use repository::{begin_transaction, with_transaction};
+// 空参数结构体（公开导出）
+#[cfg(feature = "sqlite")]
+pub use db::EmptyParams;
 
-// 当启用 embed feature 时，重新导出 include_dir
+// ============================================================================
+// 内部模块（仅供宏使用，不要直接调用！）
+// ============================================================================
+
+/// **⚠️ 内部模块，禁止直接使用！**
+///
+/// 此模块仅供 `#[repository]` 宏生成的代码调用。
+/// 业务代码必须通过 Repository trait 访问数据库。
+///
+/// 直接调用这些函数违反 CLAUDE.md 规范！
+#[doc(hidden)]
+pub mod __internal {
+    // SQLite 内部函数（完整支持）
+    #[cfg(feature = "sqlite")]
+    pub mod sqlite {
+        pub use crate::db::sqlite::{
+            // 普通版本
+            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
+            query_scalar, with_transaction,
+            // 事务版本
+            batch_execute_tx, execute_tx, query_list_tx, query_one_tx, query_optional_tx,
+            query_scalar_tx,
+        };
+        // 事务类型
+        pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Sqlite>;
+    }
+
+    // MySQL 内部函数
+    #[cfg(feature = "mysql")]
+    pub mod mysql {
+        pub use crate::db::mysql::{
+            // 普通版本
+            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
+            query_scalar,
+            // 事务版本
+            execute_tx, query_list_tx,
+        };
+        // 事务类型
+        pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::MySql>;
+    }
+
+    // PostgreSQL 内部函数
+    #[cfg(feature = "postgres")]
+    pub mod postgres {
+        pub use crate::db::postgres::{
+            // 普通版本
+            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
+            query_scalar,
+            // 事务版本
+            execute_tx, query_list_tx,
+        };
+        // 事务类型
+        pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Postgres>;
+    }
+}
+
+// ============================================================================
+// 嵌入目录支持
+// ============================================================================
+
 #[cfg(feature = "embed")]
 pub use include_dir::{include_dir, Dir};
+
+// ============================================================================
+// 宏重新导出
+// ============================================================================
+
+/// Repository 属性宏
+///
+/// 将 trait 与 Markdown SQL 文件关联，自动生成实现。
+///
+/// ## 示例
+///
+/// ```ignore
+/// use markdown_sql::repository;
+///
+/// #[repository(sql_file = "sql/UserRepository.md")]
+/// pub trait UserRepository {
+///     async fn find_by_id(&self, params: &IdParams) -> Result<Option<User>>;
+/// }
+/// ```
+pub use markdown_sql_macros::repository;
+pub use markdown_sql_macros::transactional;
 
 /// 版本号
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

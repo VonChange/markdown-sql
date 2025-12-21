@@ -1,4 +1,4 @@
-//! Repository 执行辅助模块
+//! SQLite Repository 执行辅助模块
 //!
 //! 为 `#[repository]` 宏生成的代码提供运行时支持。
 //!
@@ -15,7 +15,7 @@ use serde_json::Value;
 use sqlx::sqlite::{SqliteArguments, SqliteRow};
 use sqlx::{Arguments, FromRow, Row, Sqlite, Transaction};
 
-use crate::database::DbPool;
+use super::traits::DbPool;
 use crate::error::{MarkdownSqlError, Result};
 use crate::manager::SqlManager;
 use crate::param_extractor::ParamExtractor;
@@ -323,7 +323,7 @@ where
 
     if manager.is_debug() {
         tracing::debug!(
-            "[SQL] 批量执行 {} 完成，共 {} 条，影响 {} 行",
+            "[SQLite] 批量执行 {} 完成，共 {} 条，影响 {} 行",
             sql_id,
             items.len(),
             total_affected
@@ -370,7 +370,7 @@ where
 
     if manager.is_debug() {
         tracing::debug!(
-            "[SQL] 批量执行(事务) {} 完成，共 {} 条，影响 {} 行",
+            "[SQLite] 批量执行(事务) {} 完成，共 {} 条，影响 {} 行",
             sql_id,
             items.len(),
             total_affected
@@ -454,7 +454,7 @@ fn prepare_sql<P: Serialize>(
 
     if manager.is_debug() {
         tracing::debug!(
-            "[SQL] {} → {}\n  参数: {:?}\n  值: {}",
+            "[SQLite] {} → {}\n  参数: {:?}\n  值: {}",
             sql_id,
             result.sql,
             result.params,
@@ -466,7 +466,7 @@ fn prepare_sql<P: Serialize>(
 }
 
 /// 从 JSON 构建 SQLite 参数
-fn build_arguments(param_names: &[String], json_value: &Value) -> Result<SqliteArguments<'static>> {
+pub(crate) fn build_arguments(param_names: &[String], json_value: &Value) -> Result<SqliteArguments<'static>> {
     let mut args = SqliteArguments::default();
 
     for name in param_names {
@@ -492,7 +492,7 @@ fn build_arguments(param_names: &[String], json_value: &Value) -> Result<SqliteA
 }
 
 /// 获取嵌套 JSON 值
-fn get_nested_value(value: &Value, path: &str) -> Option<Value> {
+pub(crate) fn get_nested_value(value: &Value, path: &str) -> Option<Value> {
     if path.contains('.') {
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = value;

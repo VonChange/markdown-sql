@@ -160,12 +160,16 @@ impl SqlManager {
         Ok(count)
     }
 
-    /// 从内容加载 SQL
+    /// 从内容加载 SQL（内部使用）
+    ///
+    /// ⚠️ 此方法仅供 `load_embedded_dir` 内部调用。
+    /// 外部代码请使用 `load_file()` 或 `load_embedded_dir()`。
     ///
     /// # 参数
     /// - `content`: Markdown 内容
     /// - `namespace`: 命名空间
-    pub fn load_content(&mut self, content: &str, namespace: &str) -> Result<usize> {
+    #[cfg_attr(not(feature = "embed"), allow(dead_code))]
+    pub(crate) fn load_content(&mut self, content: &str, namespace: &str) -> Result<usize> {
         let sql_blocks = MarkdownParser::parse_content(content)?;
         let count = sql_blocks.len();
         self.register_blocks(sql_blocks, namespace)?;

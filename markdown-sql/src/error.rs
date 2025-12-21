@@ -47,6 +47,14 @@ pub enum MarkdownSqlError {
         content: String,
         suggestion: String,
     },
+
+    /// 记录不存在
+    #[error("记录不存在: {0}")]
+    NotFound(String),
+
+    /// 功能不支持
+    #[error("功能不支持: {0}")]
+    NotSupported(String),
 }
 
 /// 结果类型别名

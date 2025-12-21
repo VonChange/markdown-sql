@@ -12,17 +12,44 @@
 - 🎯 **trait 方式**：定义 trait 接口，宏自动生成实现
 - 🔄 **事务支持**：支持手动事务和闭包事务
 - 📦 **批量操作**：一条 SQL + 多组参数，预编译复用
+- 🗄️ **多数据库**：支持 SQLite、MySQL、PostgreSQL
 
 ## 📦 安装
+
+### SQLite（默认）
 
 ```toml
 [dependencies]
 markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
-markdown-sql-macros = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
+once_cell = "1"
 ```
+
+### MySQL
+
+```toml
+[dependencies]
+markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main", features = ["mysql"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "mysql"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+once_cell = "1"
+```
+
+### PostgreSQL
+
+```toml
+[dependencies]
+markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main", features = ["postgres"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+once_cell = "1"
+```
+
+> **注意**：`#[repository]` 宏已被 `markdown-sql` 重新导出，无需单独引用 `markdown-sql-macros`。
 
 ## 🚀 快速开始
 
@@ -72,7 +99,7 @@ VALUES (#{name}, #{age}, #{status})
 ### 2. 定义 Repository trait
 
 ```rust
-use markdown_sql_macros::repository;
+use markdown_sql::repository;  // 宏已被重新导出
 use serde::Serialize;
 
 // 参数结构体
@@ -171,20 +198,47 @@ async fn example(db: &impl DbPool) {
 
 ## 🔄 事务支持
 
+每个 Repository 方法都会自动生成 `_tx` 事务版本：
+
+- `insert(&db, &user)` → `insert_tx(&mut tx, &user)`
+- `find_all(&db)` → `find_all_tx(&mut tx)`
+- `update(&db, &user)` → `update_tx(&mut tx, &user)`
+
+### `#[transactional]` 自动事务
+
+对于需要自动事务的方法，使用 `#[transactional]` 注解：
+
+```rust
+use markdown_sql::{repository, transactional};
+
+#[repository(sql_file = "sql/UserRepository.md")]
+pub trait UserRepository {
+    // 普通方法（无事务）
+    async fn insert(&self, user: &UserInsert) -> Result<u64>;
+    
+    // 自动事务方法
+    #[transactional]
+    async fn batch_insert(&self, user: &UserInsert) -> Result<u64>;
+}
+
+// 调用时自动：开启事务 → 执行 → 成功提交/失败回滚
+repo.batch_insert(&db, &user).await?;
+```
+
 ### 手动事务
 
 ```rust
-use markdown_sql::{begin_transaction, execute_tx, query_list_tx};
+let repo = get_user_repo();
 
 // 开启事务
-let mut tx = begin_transaction(&db).await?;
+let mut tx = repo.begin_transaction(&db).await?;
 
-// 在事务中执行操作
-execute_tx(&manager, &mut tx, "insert", &user1).await?;
-execute_tx(&manager, &mut tx, "insert", &user2).await?;
+// 在事务中执行多个操作
+repo.insert_tx(&mut tx, &user1).await?;
+repo.insert_tx(&mut tx, &user2).await?;
 
-// 查询也可以在事务中
-let users: Vec<User> = query_list_tx(&manager, &mut tx, "findAll", &json!({})).await?;
+// 在事务中查询（能看到未提交的数据）
+let users = repo.find_all_tx(&mut tx).await?;
 
 // 提交事务
 tx.commit().await?;
@@ -192,25 +246,57 @@ tx.commit().await?;
 // 如果不调用 commit()，事务会在 tx drop 时自动回滚
 ```
 
-### 闭包事务
+### 事务回滚
 
 ```rust
-use markdown_sql::with_transaction;
+let mut tx = repo.begin_transaction(&db).await?;
 
-with_transaction(&db, |tx| Box::pin(async move {
-    execute_tx(&manager, tx, "insert", &user1).await?;
-    execute_tx(&manager, tx, "update", &user2).await?;
-    Ok(())
-})).await?;
-// 成功则自动 commit，失败则自动 rollback
+repo.insert_tx(&mut tx, &user).await?;
+
+// 显式回滚
+tx.rollback().await?;
+```
+
+### 业务服务层事务示例
+
+```rust
+pub struct OrderService {
+    order_repo: OrderRepositoryImpl,
+    item_repo: OrderItemRepositoryImpl,
+}
+
+impl OrderService {
+    /// 创建订单（多个 Repository 在同一事务中）
+    pub async fn create_order(
+        &self,
+        db: &impl SqliteDbPool,
+        order: &Order,
+        items: &[OrderItem],
+    ) -> Result<(), AppError> {
+        // 开启事务
+        let mut tx = self.order_repo.begin_transaction(db).await?;
+        
+        // 插入订单
+        self.order_repo.insert_tx(&mut tx, order).await?;
+        
+        // 插入订单项
+        for item in items {
+            self.item_repo.insert_tx(&mut tx, item).await?;
+        }
+        
+        // 提交事务
+        tx.commit().await?;
+        Ok(())
+    }
+}
 ```
 
 ## 📦 批量操作
 
-一条 SQL + 多组参数，预编译复用，在事务内执行：
+通过事务 + 循环调用实现批量操作：
 
 ```rust
-use markdown_sql::batch_execute;
+let repo = get_user_repo();
 
 // 准备数据
 let users = vec![
@@ -219,40 +305,31 @@ let users = vec![
     UserInsert { name: "用户3".into(), age: 28, status: 1 },
 ];
 
-// 批量插入（内部自动开启事务）
-let affected = batch_execute(&manager, &db, "insert", &users).await?;
-println!("插入 {} 条", affected);
-```
-
-### 在事务中批量操作
-
-```rust
-use markdown_sql::{begin_transaction, batch_execute_tx};
-
-let mut tx = begin_transaction(&db).await?;
-
-// 批量插入
-batch_execute_tx(&manager, &mut tx, "insertUser", &users).await?;
-
-// 批量更新
-batch_execute_tx(&manager, &mut tx, "updateOrder", &orders).await?;
-
+// 开启事务批量插入
+let mut tx = repo.begin_transaction(&db).await?;
+for user in &users {
+    repo.insert_tx(&mut tx, &user).await?;
+}
 tx.commit().await?;
 ```
 
+> **注意**：所有数据库操作必须通过 Repository 方法（普通版或 `_tx` 版本）调用。
+
 ## 🗃️ DbPool trait
 
-所有 Repository 方法的 `db` 参数接受实现了 `DbPool` trait 的类型：
+所有 Repository 方法的 `db` 参数接受实现了对应数据库 `DbPool` trait 的类型：
 
 ```rust
-use markdown_sql::DbPool;
+use markdown_sql::SqliteDbPool;  // SQLite
+// use markdown_sql::MySqlDbPool;   // MySQL
+// use markdown_sql::PgDbPool;      // PostgreSQL
 
 // 自定义数据库封装
 pub struct AppDb {
     pub sqlite: Pool<Sqlite>,
 }
 
-impl DbPool for AppDb {
+impl SqliteDbPool for AppDb {
     fn pool(&self) -> &Pool<Sqlite> {
         &self.sqlite
     }
@@ -263,8 +340,9 @@ repo.find_by_id(&db, &params).await?;
 ```
 
 框架已内置实现：
-- `Pool<Sqlite>`
-- `&Pool<Sqlite>`
+- `Pool<DB>` （直接传连接池）
+- `&Pool<DB>`（传连接池引用）
+- `Arc<T>` where `T: DbPool`
 - `Arc<T>` where T: DbPool
 
 ## 📝 SQL 语法
@@ -378,14 +456,111 @@ AI:
 完成！无需写任何执行代码。
 ```
 
-## 📖 示例
+## 🗄️ 多数据库支持
 
-运行示例项目：
+通过 `#[repository]` 宏的 `db_type` 参数指定数据库类型：
 
-```bash
-cd examples/demo
-cargo run
+### SQLite（默认）
+
+```rust
+use markdown_sql::{repository, SqliteDbPool, DbType, SqlManager};
+
+// 定义数据库封装
+struct AppDb {
+    pool: sqlx::Pool<sqlx::Sqlite>,
+}
+
+impl SqliteDbPool for AppDb {
+    fn pool(&self) -> &sqlx::Pool<sqlx::Sqlite> {
+        &self.pool
+    }
+}
+
+// db_type 默认为 "sqlite"，可省略
+#[repository(sql_file = "sql/UserRepository.md")]
+pub trait UserRepository {
+    async fn find_all(&self) -> Result<Vec<User>, MarkdownSqlError>;
+    async fn insert(&self, user: &UserInsert) -> Result<u64, MarkdownSqlError>;
+}
+
+// 使用
+let repo = UserRepositoryImpl::new(&SQL_MANAGER);
+let users = repo.find_all(&db).await?;
 ```
+
+### MySQL
+
+```rust
+use markdown_sql::{repository, MySqlDbPool, DbType, SqlManager};
+
+// 定义数据库封装
+struct AppDb {
+    pool: sqlx::Pool<sqlx::MySql>,
+}
+
+impl MySqlDbPool for AppDb {
+    fn pool(&self) -> &sqlx::Pool<sqlx::MySql> {
+        &self.pool
+    }
+}
+
+// 指定 db_type = "mysql"
+#[repository(sql_file = "sql/UserRepository.md", db_type = "mysql")]
+pub trait UserRepository {
+    async fn find_all(&self) -> Result<Vec<User>, MarkdownSqlError>;
+    async fn insert(&self, user: &UserInsert) -> Result<u64, MarkdownSqlError>;
+}
+
+// 使用
+let repo = UserRepositoryImpl::new(&SQL_MANAGER);
+let users = repo.find_all(&db).await?;
+```
+
+### PostgreSQL
+
+```rust
+use markdown_sql::{repository, PgDbPool, DbType, SqlManager};
+
+// 定义数据库封装
+struct AppDb {
+    pool: sqlx::Pool<sqlx::Postgres>,
+}
+
+impl PgDbPool for AppDb {
+    fn pool(&self) -> &sqlx::Pool<sqlx::Postgres> {
+        &self.pool
+    }
+}
+
+// 指定 db_type = "postgres"
+#[repository(sql_file = "sql/UserRepository.md", db_type = "postgres")]
+pub trait UserRepository {
+    async fn find_all(&self) -> Result<Vec<User>, MarkdownSqlError>;
+    async fn insert(&self, user: &UserInsert) -> Result<u64, MarkdownSqlError>;
+}
+
+// 使用
+let repo = UserRepositoryImpl::new(&SQL_MANAGER);
+let users = repo.find_all(&db).await?;
+```
+
+### 数据库类型配置
+
+SqlManager 需要配置对应的 `DbType`：
+
+```rust
+// SQLite/MySQL 使用 ? 占位符
+let manager = SqlManager::builder()
+    .db_type(DbType::Sqlite)  // 或 DbType::Mysql
+    .build()?;
+
+// PostgreSQL 使用 $1, $2, ... 占位符
+let manager = SqlManager::builder()
+    .db_type(DbType::Postgres)
+    .build()?;
+```
+
+> **注意**：`db_type` 参数支持 `"sqlite"`、`"mysql"`、`"postgres"`（或 `"postgresql"`、`"pg"`）。
 
 ## 📖 文档
 

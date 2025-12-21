@@ -338,15 +338,6 @@ This framework is designed with AI-assisted programming in mind:
 4. **Safe by Default**: `#{param}` syntax prevents AI from accidentally generating SQL injection vulnerabilities
 5. **Trait-based**: AI only defines interfaces, no execution code needed
 
-## 📖 Examples
-
-Run the demo project:
-
-```bash
-cd examples/demo
-cargo run
-```
-
 ## 📖 Documentation
 
 See detailed design document: [plan/2025-12-21-markdown-sql.md](plan/2025-12-21-markdown-sql.md)

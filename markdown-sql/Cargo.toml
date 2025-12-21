@@ -7,7 +7,11 @@ license.workspace = true
 description = "Markdown SQL 核心库 - SQL 解析、模板渲染、执行器"
 
 [features]
-default = []
+default = ["sqlite"]
+# 数据库 features（传递给 sqlx）
+sqlite = ["sqlx/sqlite"]
+mysql = ["sqlx/mysql"]
+postgres = ["sqlx/postgres"]
 # 启用嵌入目录支持（编译时将 SQL 文件嵌入二进制）
 embed = ["include_dir"]
 
@@ -15,8 +19,8 @@ embed = ["include_dir"]
 # 模板引擎
 minijinja = { workspace = true, features = ["loader"] }
 
-# 数据库（启用 sqlite）
-sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+# 数据库
+sqlx = { workspace = true, features = ["runtime-tokio"] }
 
 # 正则表达式
 regex = { workspace = true }
@@ -37,7 +41,10 @@ serde_json = { workspace = true }
 # 嵌入目录（可选）
 include_dir = { version = "0.7", optional = true }
 
+# 过程宏（重新导出 #[repository] 宏）
+markdown-sql-macros = { path = "../markdown-sql-macros" }
+
 [dev-dependencies]
 tokio = { workspace = true }
-# SQLite 仅用于测试
-sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+# 测试时启用所有数据库
+sqlx = { workspace = true, features = ["sqlite", "mysql", "postgres", "runtime-tokio"] }

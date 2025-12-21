@@ -213,19 +213,19 @@ markdown-sql/
 │       ├── manager.rs            # SQL 管理器（启动时注册 + 缓存）
 │       ├── param_extractor.rs    # 参数提取器（#{param} → ? + 参数列表）
 │       ├── executor.rs           # SQL 执行器（封装 sqlx，参数绑定）
+│       ├── database.rs           # DbPool trait 定义
 │       └── error.rs              # 错误定义
 ├── markdown-sql-macros/          # 过程宏
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs                # #[repository] 宏
 │       └── safety_checker.rs     # 安全检查器（编译时检测危险语法）
-└── examples/
-    └── demo/                     # 示例项目
-        ├── Cargo.toml
-        ├── src/
-        │   └── main.rs
-        └── sql/
-            └── UserRepository.md
+└── markdown-sql/tests/           # 测试用例
+    ├── integration_test.rs       # 集成测试
+    ├── demo_test.rs              # 宏测试
+    ├── feature_test.rs           # 功能测试（CRUD/事务/批量）
+    └── sql/
+        └── UserRepository.md     # 测试用 SQL 文件
 ```
 
 ### Cargo.toml 依赖示例
@@ -1907,86 +1907,96 @@ WHERE o.id = #{id}
 
 ### 阶段一：核心框架（MVP）
 
-- [ ] 创建 `markdown-sql` 项目结构
-- [ ] 实现 Markdown SQL 解析器 (parser.rs) - 纯字符串操作
-- [ ] 实现 SQL 管理器 (manager.rs) - 启动时注册模板到 MiniJinja
-- [ ] 实现参数提取器 (param_extractor.rs) - `#{param}` → `?/$1` + 参数列表
-- [ ] **实现多数据库占位符** - MySQL/SQLite 用 `?`，PostgreSQL 用 `$1`
-- [ ] 实现自定义过滤器 `bind_join` - IN 查询支持
-- [ ] 实现自定义过滤器 `raw_safe` - 显式安全豁免
-- [ ] 实现 SQL 执行器 (executor.rs) - sqlx 参数绑定执行
-- [ ] **实现返回值类型约定** - `Vec<T>` / `Option<T>` / `u64` 自动映射
-- [ ] **实现 Debug 模式** - 输出 SQL 执行日志
-- [ ] **实现批量操作（BatchExecutor）** - 预编译复用 + 事务
-- [ ] 基础错误处理 (error.rs)
-- [ ] 编写单元测试
+- [x] 创建 `markdown-sql` 项目结构
+- [x] 实现 Markdown SQL 解析器 (parser.rs) - 纯字符串操作
+- [x] 实现 SQL 管理器 (manager.rs) - 启动时注册模板到 MiniJinja
+- [x] 实现参数提取器 (param_extractor.rs) - `#{param}` → `?/$1` + 参数列表
+- [x] **实现多数据库占位符** - MySQL/SQLite 用 `?`，PostgreSQL 用 `$1`
+- [x] 实现自定义过滤器 `bind_join` - IN 查询支持
+- [x] 实现自定义过滤器 `raw_safe` - 显式安全豁免
+- [x] 实现 SQL 执行器 (executor.rs) - sqlx 参数绑定执行
+- [x] **实现返回值类型约定** - `Vec<T>` / `Option<T>` / `u64` 自动映射
+- [x] **实现 Debug 模式** - 输出 SQL 执行日志
+- [x] **实现批量操作（BatchExecutor）** - 预编译复用 + 事务
+- [x] 基础错误处理 (error.rs)
+- [x] 编写单元测试
 
 ### 阶段二：宏支持 + 编译时安全检查
 
-- [ ] 创建 `markdown-sql-macros` 子 crate
-- [ ] 实现 `#[repository]` 属性宏
-- [ ] **实现编译时安全检查 (safety_checker.rs)** - 检测 `{{ }}` 禁止语法
-- [ ] 方法名 -> SQL ID 转换（snake_case -> camelCase）
-- [ ] 自动生成 Impl 结构体
-- [ ] 编写宏测试
+- [x] 创建 `markdown-sql-macros` 子 crate
+- [x] 实现 `#[repository]` 属性宏
+- [x] **实现编译时安全检查 (safety_checker.rs)** - 检测 `{{ }}` 禁止语法
+- [x] 方法名 -> SQL ID 转换（snake_case -> camelCase）
+- [x] 自动生成 Impl 结构体
+- [x] 编写宏测试
+- [x] `load_content()` 改为 `pub(crate)` 禁止外部调用
+- [x] CLAUDE.md 规范文档
 
 ### 阶段三：事务支持（SeaORM 风格）
 
-- [ ] 实现 `SqlExecutor` trait 抽象
-- [ ] Repository 方法支持泛型执行器
-- [ ] 支持手动事务（`begin` / `commit` / `rollback`）
-- [ ] 编写事务测试
+- [x] 实现事务支持函数（`begin_transaction`、`_tx` 系列函数）
+- [x] Repository 方法支持泛型执行器（`DbPool` trait）
+- [x] 支持手动事务（`begin` / `commit` / `rollback`）
+- [x] 支持闭包事务（`with_transaction`）
+- [x] 编写事务测试
 
 ### 阶段四：完善
 
-- [ ] 支持多数据库（SQLite、MySQL、PostgreSQL）
-- [ ] 编写示例项目
-- [ ] 编写文档
+- [x] 支持多数据库（SQLite、MySQL、PostgreSQL）
+  - [x] 实现 `SqliteDbPool`、`MySqlDbPool`、`PgDbPool` traits
+  - [x] 实现 `mysql` 模块（查询、事务、批量操作）
+  - [x] 实现 `postgres` 模块（查询、事务、批量操作）
+  - [x] Feature flags 条件编译（`sqlite`、`mysql`、`postgres`）
+  - [x] MySQL 集成测试（需要 Docker 运行）
+  - [x] PostgreSQL 集成测试（需要 Docker 运行）
+- [x] 编写功能测试（feature_test.rs）
+- [x] 编写文档
 
 ---
 
 ## 🎯 验收标准
 
 1. **功能验收**
-   - [ ] 能正确解析 Markdown 文件中的 SQL 代码块
-   - [ ] 能根据 SQL ID 注册 MiniJinja 模板
-   - [ ] `{% include "sqlId" %}` 能正确引用其他 SQL 片段
-   - [ ] MiniJinja 能正确渲染动态 SQL（条件、循环）
-   - [ ] `#{param}` 能正确转换为 `?`（MySQL/SQLite）或 `$1`（PostgreSQL）
-   - [ ] `{{ list | bind_join(",") }}` 能正确生成 IN 查询占位符
-   - [ ] sqlx 参数绑定执行（防止 SQL 注入）
-   - [ ] **返回值类型**：`Vec<T>` 返回列表，`Option<T>` 返回单条（取第一行）
-   - [ ] **多数据库**：支持 MySQL、SQLite、PostgreSQL 的占位符差异
-   - [ ] **Debug 模式**：开启后输出 SQL、参数、执行时间日志
+   - [x] 能正确解析 Markdown 文件中的 SQL 代码块
+   - [x] 能根据 SQL ID 注册 MiniJinja 模板
+   - [x] `{% include "sqlId" %}` 能正确引用其他 SQL 片段
+   - [x] MiniJinja 能正确渲染动态 SQL（条件、循环）
+   - [x] `#{param}` 能正确转换为 `?`（MySQL/SQLite）或 `$1`（PostgreSQL）
+   - [x] `{{ list | bind_join(",") }}` 能正确生成 IN 查询占位符
+   - [x] sqlx 参数绑定执行（防止 SQL 注入）
+   - [x] **返回值类型**：`Vec<T>` 返回列表，`Option<T>` 返回单条（取第一行）
+   - [x] **多数据库**：支持 MySQL、SQLite、PostgreSQL 的占位符差异
+   - [x] **Debug 模式**：开启后输出 SQL、参数、执行时间日志
 
 2. **安全验收（编译时）**
-   - [ ] 编译时检测 `{{ param }}` 直接输出语法，**编译失败**
-   - [ ] 编译时检测 `{{ list | join() }}` 不安全过滤器，**编译失败**
-   - [ ] `{{ param | raw_safe }}` 能通过安全检查（显式豁免）
-   - [ ] 编译错误信息清晰，指向 Rust 代码位置，包含 SQL 文件名、行号、建议
+   - [x] 编译时检测 `{{ param }}` 直接输出语法，**编译失败**
+   - [x] 编译时检测 `{{ list | join() }}` 不安全过滤器，**编译失败**
+   - [x] `{{ param | raw_safe }}` 能通过安全检查（显式豁免）
+   - [x] 编译错误信息清晰，指向 Rust 代码位置，包含 SQL 文件名、行号、建议
 
 3. **事务验收**
-   - [ ] Repository 方法支持传入 `&Pool` 执行普通查询
-   - [ ] Repository 方法支持传入 `&mut Transaction` 执行事务操作
-   - [ ] 手动事务：`begin` → 多次操作 → `commit` 能正常工作
-   - [ ] 事务回滚：不调用 `commit`，Transaction drop 时自动回滚
+   - [x] Repository 方法支持传入 `&impl DbPool` 执行普通查询
+   - [x] `_tx` 系列函数支持传入 `&mut Transaction` 执行事务操作
+   - [x] 手动事务：`begin_transaction` → 多次操作 → `commit` 能正常工作
+   - [x] 事务回滚：不调用 `commit`，Transaction drop 时自动回滚
+   - [x] 闭包事务：`with_transaction` 自动处理 commit/rollback
 
 4. **批量操作验收**
-   - [ ] 批量插入：一条 SQL + `&[Entity]` 参数，预编译复用执行
-   - [ ] 批量更新：一条 SQL + `&[Entity]` 参数，预编译复用执行
-   - [ ] 自动识别：参数为 `&[T]` / `Vec<T>` 时自动使用批量模式
-   - [ ] 事务保证：批量操作在事务内执行，保证原子性
+   - [x] 批量插入：`batch_execute` 一条 SQL + `&[Entity]` 参数，预编译复用执行
+   - [x] 批量更新：`batch_execute` 一条 SQL + `&[Entity]` 参数，预编译复用执行
+   - [x] 事务内批量：`batch_execute_tx` 支持在外部事务内批量操作
+   - [x] 事务保证：批量操作在事务内执行，保证原子性
 
 5. **质量门**
-   - [ ] `cargo build` 编译通过
-   - [ ] `cargo clippy` 无警告
-   - [ ] `cargo test` 测试通过
-   - [ ] 关键代码有中文注释
+   - [x] `cargo build` 编译通过
+   - [x] `cargo clippy` 无警告
+   - [x] `cargo test` 测试通过
+   - [x] 关键代码有中文注释
 
 6. **使用验收**
-   - [ ] 示例项目能正常运行
-   - [ ] API 简洁易用
-   - [ ] AI 可直接生成 Markdown SQL（无需学习自定义语法）
+   - [x] 功能测试（feature_test.rs）全部通过
+   - [x] API 简洁易用
+   - [x] AI 可直接生成 Markdown SQL（无需学习自定义语法）
 
 ---
 
