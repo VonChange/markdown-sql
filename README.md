@@ -1,26 +1,27 @@
 # markdown-sql
 
-A Rust framework for storing SQL in Markdown files with dynamic SQL and parameter binding support.
+A Rust framework for storing SQL in Markdown files, with dynamic SQL and parameter binding support.
 
 [中文文档](README.zh-CN.md)
 
 ## ✨ Features
 
-- 📝 **Markdown SQL**: Write SQL in Markdown code blocks for better readability
-- 🔒 **Security**: Compile-time SQL injection checks, all parameters are bound
-- 🎨 **Dynamic SQL**: MiniJinja template syntax with conditionals and loops
-- 🔗 **SQL Reuse**: `{% include %}` to reference other SQL fragments
-- 🚀 **High Performance**: Pre-compiled templates at startup, zero parsing overhead at runtime
-- 🔄 **Transaction Support**: SeaORM-style generic executor
-- 📦 **Batch Operations**: Prepared statement reuse for batch execution
+- 📝 **Markdown SQL**: SQL in Markdown code blocks, highly readable
+- 🔒 **Safe**: Compile-time SQL injection check, all parameters bound
+- 🎨 **Dynamic SQL**: MiniJinja template syntax, supports conditions and loops
+- 🔗 **SQL Reuse**: `{% include %}` references other SQL fragments
+- 🚀 **High Performance**: Templates pre-compiled at startup, zero runtime parsing overhead
+- 🎯 **Trait-based**: Define trait interface, macro auto-generates implementation
 
 ## 📦 Installation
 
 ```toml
 [dependencies]
 markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+markdown-sql-macros = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 ## 🚀 Quick Start
@@ -58,62 +59,76 @@ WHERE 1=1
 {% if name %}AND name LIKE #{name}{% endif %}
 {% if status %}AND status = #{status}{% endif %}
 ​```
-
-## IN Query
-
-​```sql
--- findByIds
-SELECT {% include "columns" %}
-FROM user
-WHERE id IN ({{ ids | bind_join(",") }})
-​```
-
-## Insert User
-
-​```sql
--- insert
-INSERT INTO user (name, age, status)
-VALUES (#{name}, #{age}, #{status})
-​```
 ```
 
-### 2. Use SqlManager
+### 2. Define Repository Trait
 
 ```rust
-use markdown_sql::{DbType, ParamExtractor, SqlManager};
-use serde_json::json;
+use markdown_sql_macros::repository;
+use serde::Serialize;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Create SQL manager
+// Parameter structs
+#[derive(Serialize)]
+pub struct IdParams {
+    pub id: i64,
+}
+
+// Define Repository trait
+// Method names auto-map to SQL IDs (snake_case → camelCase)
+// find_by_id → findById
+#[repository(sql_file = "sql/UserRepository.md")]
+pub trait UserRepository {
+    /// Find user by ID
+    async fn find_by_id(
+        &self,
+        db: &sqlx::Pool<sqlx::Sqlite>,
+        params: &IdParams,
+    ) -> Result<Option<User>, AppError>;
+
+    /// Get total count
+    async fn get_count(&self, db: &sqlx::Pool<sqlx::Sqlite>) -> Result<i64, AppError>;
+}
+```
+
+### 3. Use Repository
+
+```rust
+use include_dir::{include_dir, Dir};
+use markdown_sql::{DbType, SqlManager};
+use once_cell::sync::Lazy;
+
+// Embed SQL directory
+static SQL_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/sql");
+
+// Global SQL manager
+static SQL_MANAGER: Lazy<SqlManager> = Lazy::new(|| {
     let mut manager = SqlManager::builder()
-        .db_type(DbType::Postgres)
+        .db_type(DbType::Sqlite)
         .debug(true)
-        .build()?;
+        .build()
+        .expect("Failed to create SqlManager");
 
-    // 2. Load SQL file
-    manager.load_file("sql/UserRepository.md")?;
+    manager
+        .load_embedded_dir(&SQL_DIR)
+        .expect("Failed to load SQL directory");
 
-    // 3. Render SQL
-    let sql = manager.render("findById", &json!({"id": 1}))?;
-    // Output: SELECT id, name, age, status, create_time FROM user WHERE id = #{id}
+    manager
+});
 
-    // 4. Extract parameters
-    let result = ParamExtractor::extract(&sql, DbType::Postgres);
-    // result.sql: "SELECT ... WHERE id = $1"
-    // result.params: ["id"]
+// Get Repository instance
+pub fn get_user_repo() -> UserRepositoryImpl {
+    UserRepositoryImpl::new(&*SQL_MANAGER)
+}
 
-    // 5. Dynamic SQL
-    let sql = manager.render("findByCondition", &json!({
-        "name": "%test%",
-        "status": 1
-    }))?;
-    // Output: SELECT ... WHERE 1=1 AND name LIKE #{name} AND status = #{status}
+// Usage
+async fn example(db: &Pool<Sqlite>) {
+    let repo = get_user_repo();
 
-    // 6. IN query
-    let sql = manager.render("findByIds", &json!({"ids": [1, 2, 3]}))?;
-    // Output: SELECT ... WHERE id IN (#{__bind_0},#{__bind_1},#{__bind_2})
+    // Query single
+    let user = repo.find_by_id(db, &IdParams { id: 1 }).await?;
 
-    Ok(())
+    // Get count
+    let count = repo.get_count(db).await?;
 }
 ```
 
@@ -122,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Parameter Binding
 
 ```sql
--- Use #{param} syntax, auto-converts to $1 (Postgres) or ? (MySQL/SQLite)
+-- Use #{param} syntax, auto-converts to ? (SQLite/MySQL) or $1 (PostgreSQL)
 SELECT * FROM user WHERE id = #{id} AND name = #{name}
 ```
 
@@ -149,14 +164,7 @@ id, name, age, status
 SELECT {% include "columns" %} FROM user
 ```
 
-### IN Query
-
-```sql
--- Use bind_join filter to safely expand lists
-WHERE id IN ({{ ids | bind_join(",") }})
-```
-
-## 🔒 Security Checks
+## 🔒 Safety Check
 
 Compile-time detection of unsafe SQL patterns:
 
@@ -165,22 +173,19 @@ Compile-time detection of unsafe SQL patterns:
 | `#{param}` | ✅ Safe | Parameter binding |
 | `{{ list \| bind_join(",") }}` | ✅ Safe | IN query |
 | `{% if %}` / `{% for %}` | ✅ Safe | Dynamic logic |
-| `{{ param }}` | ❌ Compile Error | SQL injection risk |
-| `{{ list \| join(",") }}` | ❌ Compile Error | SQL injection risk |
-| `{{ param \| raw_safe }}` | ⚠️ Exempt | Explicitly declared safe |
+| `{{ param }}` | ❌ Compile error | SQL injection risk |
+| `{{ list \| join(",") }}` | ❌ Compile error | SQL injection risk |
+| `{{ param \| raw_safe }}` | ⚠️ Exempt | Explicit safe declaration |
 
-## 🗄️ Multi-Database Support
+## 🗄️ Return Type Mapping
 
-```rust
-// PostgreSQL: #{id} → $1
-let result = ParamExtractor::extract(&sql, DbType::Postgres);
-
-// MySQL: #{id} → ?
-let result = ParamExtractor::extract(&sql, DbType::Mysql);
-
-// SQLite: #{id} → ?
-let result = ParamExtractor::extract(&sql, DbType::Sqlite);
-```
+| Return Type | Execution | Description |
+|------------|-----------|-------------|
+| `Vec<T>` | fetch_all | Query list |
+| `Option<T>` | fetch_optional | Query single (optional) |
+| `T` | fetch_one | Query single (required) |
+| `i64` | Scalar query | e.g., COUNT |
+| `u64` | execute | INSERT/UPDATE/DELETE affected rows |
 
 ## 🤖 AI/Vibe Coding Friendly
 
@@ -188,47 +193,19 @@ This framework is designed with AI-assisted programming in mind:
 
 ### Why Markdown SQL?
 
-| Traditional Approach | markdown-sql |
-|---------------------|--------------|
-| SQL embedded in code, hard for AI to understand context | SQL in Markdown with clear structure and comments |
-| Magic strings scattered across files | Centralized, well-documented SQL files |
-| No clear relationship between SQL and business logic | Markdown headings describe intent |
+| Traditional | markdown-sql |
+|-------------|--------------|
+| SQL embedded in code, hard for AI to understand context | SQL in Markdown, clear structure with comments |
+| Magic strings scattered everywhere | SQL centralized, documented |
+| SQL-business logic relationship unclear | Markdown titles describe intent |
 
-### AI Benefits
+### Advantages for AI
 
-1. **Clear Context**: SQL blocks have descriptive headings
-   ```markdown
-   ## Find active users by department
-   ​```sql
-   -- findActiveUsersByDept
-   SELECT * FROM user WHERE status = 1 AND dept_id = #{deptId}
-   ​```
-   ```
-
-2. **Self-Documenting**: AI can understand what each SQL does from the Markdown structure
-
-3. **Easy Generation**: AI can generate new SQL blocks following the established pattern
-
-4. **Safe by Default**: `#{param}` syntax prevents AI from accidentally generating SQL injection vulnerabilities
-
-5. **Reusable Fragments**: `{% include %}` helps AI understand and reuse common patterns
-
-### Vibe Coding Workflow
-
-```
-Human: "Add a query to find users by email"
-
-AI: Creates in UserRepository.md:
-
-## Find user by email
-
-​```sql
--- findByEmail
-SELECT {% include "columns" %}
-FROM user
-WHERE email = #{email}
-​```
-```
+1. **Clear context**: SQL blocks have descriptive titles
+2. **Self-documenting**: AI can understand each SQL's purpose from Markdown structure
+3. **Easy to generate**: AI can generate new SQL blocks following existing patterns
+4. **Safe by default**: `#{param}` syntax prevents AI from accidentally generating SQL injection vulnerabilities
+5. **Trait-based**: AI only needs to define interface, no execution code required
 
 ## 📖 Documentation
 

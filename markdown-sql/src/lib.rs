@@ -91,6 +91,7 @@ pub mod executor;
 pub mod manager;
 pub mod param_extractor;
 pub mod parser;
+pub mod repository;
 
 // 重新导出常用类型
 pub use error::{MarkdownSqlError, Result};
@@ -98,6 +99,11 @@ pub use executor::{BatchExecutor, ExecuteContext, ParamBinder, SqlExecutor, Time
 pub use manager::{init, render, set_db_type, set_debug, SqlManager, SqlManagerBuilder};
 pub use param_extractor::{DbType, ParamExtractor, SqlResult};
 pub use parser::{MarkdownParser, SqlBlock};
+
+// Repository 辅助函数
+pub use repository::{
+    execute, query_list, query_one, query_optional, query_scalar, EmptyParams, Repository,
+};
 
 // 当启用 embed feature 时，重新导出 include_dir
 #[cfg(feature = "embed")]

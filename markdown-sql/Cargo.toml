@@ -15,8 +15,8 @@ embed = ["include_dir"]
 # 模板引擎
 minijinja = { workspace = true, features = ["loader"] }
 
-# 数据库
-sqlx = { workspace = true }
+# 数据库（启用 sqlite）
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
 
 # 正则表达式
 regex = { workspace = true }

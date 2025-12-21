@@ -9,16 +9,17 @@
 - 🎨 **动态 SQL**：使用 MiniJinja 模板语法，支持条件、循环
 - 🔗 **SQL 复用**：`{% include %}` 引用其他 SQL 片段
 - 🚀 **高性能**：启动时预编译模板，运行时零解析开销
-- 🔄 **事务支持**：SeaORM 风格的泛型执行器
-- 📦 **批量操作**：预编译复用，一条 SQL 批量执行
+- 🎯 **trait 方式**：定义 trait 接口，宏自动生成实现
 
 ## 📦 安装
 
 ```toml
 [dependencies]
 markdown-sql = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+markdown-sql-macros = { git = "https://github.com/VonChange/markdown-sql.git", branch = "main" }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 ## 🚀 快速开始
@@ -57,15 +58,6 @@ WHERE 1=1
 {% if status %}AND status = #{status}{% endif %}
 ​```
 
-## IN 查询
-
-​```sql
--- findByIds
-SELECT {% include "columns" %}
-FROM user
-WHERE id IN ({{ ids | bind_join(",") }})
-​```
-
 ## 插入用户
 
 ​```sql
@@ -75,43 +67,103 @@ VALUES (#{name}, #{age}, #{status})
 ​```
 ```
 
-### 2. 使用 SqlManager
+### 2. 定义 Repository trait
 
 ```rust
-use markdown_sql::{DbType, ParamExtractor, SqlManager};
-use serde_json::json;
+use markdown_sql_macros::repository;
+use serde::Serialize;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. 创建 SQL 管理器
+// 参数结构体
+#[derive(Serialize)]
+pub struct IdParams {
+    pub id: i64,
+}
+
+#[derive(Serialize)]
+pub struct ConditionParams {
+    pub name: Option<String>,
+    pub status: Option<i32>,
+}
+
+// 定义 Repository trait
+// 方法名自动映射到 SQL ID（snake_case → camelCase）
+// find_by_id → findById
+#[repository(sql_file = "sql/UserRepository.md")]
+pub trait UserRepository {
+    /// 根据 ID 查询用户
+    async fn find_by_id(
+        &self,
+        db: &sqlx::Pool<sqlx::Sqlite>,
+        params: &IdParams,
+    ) -> Result<Option<User>, AppError>;
+
+    /// 条件查询
+    async fn find_by_condition(
+        &self,
+        db: &sqlx::Pool<sqlx::Sqlite>,
+        params: &ConditionParams,
+    ) -> Result<Vec<User>, AppError>;
+
+    /// 获取总数
+    async fn get_count(&self, db: &sqlx::Pool<sqlx::Sqlite>) -> Result<i64, AppError>;
+
+    /// 插入用户
+    async fn insert(
+        &self,
+        db: &sqlx::Pool<sqlx::Sqlite>,
+        user: &User,
+    ) -> Result<u64, AppError>;
+}
+```
+
+### 3. 使用 Repository
+
+```rust
+use include_dir::{include_dir, Dir};
+use markdown_sql::{DbType, SqlManager};
+use once_cell::sync::Lazy;
+
+// 嵌入 SQL 目录
+static SQL_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/sql");
+
+// 全局 SQL 管理器
+static SQL_MANAGER: Lazy<SqlManager> = Lazy::new(|| {
     let mut manager = SqlManager::builder()
-        .db_type(DbType::Postgres)
+        .db_type(DbType::Sqlite)
         .debug(true)
-        .build()?;
+        .build()
+        .expect("创建 SqlManager 失败");
 
-    // 2. 加载 SQL 文件
-    manager.load_file("sql/UserRepository.md")?;
+    manager
+        .load_embedded_dir(&SQL_DIR)
+        .expect("加载 SQL 目录失败");
 
-    // 3. 渲染 SQL
-    let sql = manager.render("findById", &json!({"id": 1}))?;
-    // 输出: SELECT id, name, age, status, create_time FROM user WHERE id = #{id}
+    manager
+});
 
-    // 4. 提取参数
-    let result = ParamExtractor::extract(&sql, DbType::Postgres);
-    // result.sql: "SELECT ... WHERE id = $1"
-    // result.params: ["id"]
+// 获取 Repository 实例
+pub fn get_user_repo() -> UserRepositoryImpl {
+    UserRepositoryImpl::new(&*SQL_MANAGER)
+}
 
-    // 5. 动态 SQL
-    let sql = manager.render("findByCondition", &json!({
-        "name": "%张%",
-        "status": 1
-    }))?;
-    // 输出: SELECT ... WHERE 1=1 AND name LIKE #{name} AND status = #{status}
+// 使用
+async fn example(db: &Pool<Sqlite>) {
+    let repo = get_user_repo();
 
-    // 6. IN 查询
-    let sql = manager.render("findByIds", &json!({"ids": [1, 2, 3]}))?;
-    // 输出: SELECT ... WHERE id IN (#{__bind_0},#{__bind_1},#{__bind_2})
+    // 查询单条
+    let user = repo.find_by_id(db, &IdParams { id: 1 }).await?;
 
-    Ok(())
+    // 条件查询
+    let users = repo.find_by_condition(db, &ConditionParams {
+        name: Some("%张%".to_string()),
+        status: None,
+    }).await?;
+
+    // 获取总数
+    let count = repo.get_count(db).await?;
+
+    // 插入
+    let affected = repo.insert(db, &new_user).await?;
 }
 ```
 
@@ -120,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### 参数绑定
 
 ```sql
--- 使用 #{param} 语法，自动转换为 $1 (Postgres) 或 ? (MySQL/SQLite)
+-- 使用 #{param} 语法，自动转换为 ? (SQLite/MySQL) 或 $1 (PostgreSQL)
 SELECT * FROM user WHERE id = #{id} AND name = #{name}
 ```
 
@@ -167,18 +219,15 @@ WHERE id IN ({{ ids | bind_join(",") }})
 | `{{ list \| join(",") }}` | ❌ 编译失败 | SQL 注入风险 |
 | `{{ param \| raw_safe }}` | ⚠️ 豁免 | 显式声明安全 |
 
-## 🗄️ 多数据库支持
+## 🗄️ 返回类型映射
 
-```rust
-// PostgreSQL: #{id} → $1
-let result = ParamExtractor::extract(&sql, DbType::Postgres);
-
-// MySQL: #{id} → ?
-let result = ParamExtractor::extract(&sql, DbType::Mysql);
-
-// SQLite: #{id} → ?
-let result = ParamExtractor::extract(&sql, DbType::Sqlite);
-```
+| 返回类型 | 执行方式 | 说明 |
+|---------|---------|------|
+| `Vec<T>` | fetch_all | 查询列表 |
+| `Option<T>` | fetch_optional | 查询单条（可选） |
+| `T` | fetch_one | 查询单条（必须存在） |
+| `i64` | 标量查询 | 如 COUNT |
+| `u64` | execute | INSERT/UPDATE/DELETE 影响行数 |
 
 ## 🤖 AI 编程 / Vibe Coding 友好
 
@@ -195,44 +244,39 @@ let result = ParamExtractor::extract(&sql, DbType::Sqlite);
 ### 对 AI 的优势
 
 1. **清晰的上下文**：SQL 块有描述性标题
-   ```markdown
-   ## 按部门查询活跃用户
-   ​```sql
-   -- findActiveUsersByDept
-   SELECT * FROM user WHERE status = 1 AND dept_id = #{deptId}
-   ​```
-   ```
-
 2. **自文档化**：AI 可以从 Markdown 结构理解每个 SQL 的作用
-
 3. **易于生成**：AI 可以按照已有模式生成新的 SQL 块
-
 4. **默认安全**：`#{param}` 语法防止 AI 意外生成 SQL 注入漏洞
-
-5. **可复用片段**：`{% include %}` 帮助 AI 理解和复用通用模式
+5. **trait 方式**：AI 只需定义接口，无需写执行代码
 
 ### Vibe Coding 工作流
 
 ```
 用户: "添加一个按邮箱查询用户的方法"
 
-AI: 在 UserRepository.md 中生成:
+AI:
 
-## 按邮箱查询用户
+1. 在 UserRepository.md 中添加:
+   ## 按邮箱查询用户
+   ​```sql
+   -- findByEmail
+   SELECT {% include "columns" %}
+   FROM user
+   WHERE email = #{email}
+   ​```
 
-​```sql
--- findByEmail
-SELECT {% include "columns" %}
-FROM user
-WHERE email = #{email}
-​```
+2. 在 trait 中添加方法:
+   async fn find_by_email(&self, db: &Pool<Sqlite>, params: &EmailParams)
+       -> Result<Option<User>, AppError>;
+
+3. 添加参数结构体:
+   #[derive(Serialize)]
+   pub struct EmailParams {
+       pub email: String,
+   }
+
+完成！无需写任何执行代码。
 ```
-
-### 设计理念
-
-- **让 AI 更好理解**：SQL 不再是散落的字符串，而是有结构、有注释的文档
-- **减少 AI 出错**：强制参数绑定，编译时安全检查
-- **提高 AI 效率**：清晰的模式让 AI 能快速学习并生成正确的代码
 
 ## 📖 文档
 

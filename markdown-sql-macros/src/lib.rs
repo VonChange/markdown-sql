@@ -11,8 +11,10 @@
 //!
 //! #[repository(sql_file = "sql/UserRepository.md")]
 //! pub trait UserRepository {
-//!     async fn find_by_id(&self, id: i64) -> Option<User>;
-//!     async fn insert(&self, name: &str, age: i32) -> u64;
+//!     async fn find_by_id(&self, id: i64) -> Result<Option<User>>;
+//!     async fn find_all(&self) -> Result<Vec<User>>;
+//!     async fn get_count(&self) -> Result<i64>;
+//!     async fn insert(&self, user: &UserInput) -> Result<u64>;
 //! }
 //! ```
 
@@ -21,7 +23,8 @@ use quote::{format_ident, quote};
 use std::path::PathBuf;
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, Ident, ItemTrait, LitStr, Token, TraitItem,
+    parse_macro_input, GenericArgument, Ident, ItemTrait, LitStr, PathArguments, ReturnType, Token,
+    TraitItem, Type,
 };
 
 mod parser;
@@ -29,59 +32,6 @@ mod safety_checker;
 
 use parser::parse_content;
 use safety_checker::SafetyChecker;
-
-/// 检查 SQL 文件安全性
-///
-/// 在编译时读取 SQL 文件，检测不安全的模式。
-fn check_sql_file_safety(sql_file: &str) -> Result<(), String> {
-    // 获取项目根目录（CARGO_MANIFEST_DIR）
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .map_err(|_| "无法获取 CARGO_MANIFEST_DIR".to_string())?;
-
-    let file_path = PathBuf::from(&manifest_dir).join(sql_file);
-
-    // 读取文件内容
-    let content = std::fs::read_to_string(&file_path).map_err(|e| {
-        format!(
-            "无法读取 SQL 文件 '{}': {}\n  完整路径: {}",
-            sql_file,
-            e,
-            file_path.display()
-        )
-    })?;
-
-    // 解析 SQL 块
-    let blocks = parse_content(&content);
-
-    if blocks.is_empty() {
-        return Err(format!(
-            "SQL 文件 '{}' 中没有找到有效的 SQL 块\n  请确保 SQL 块使用 ```sql 和 -- sqlId 格式",
-            sql_file
-        ));
-    }
-
-    // 收集所有错误
-    let mut errors = Vec::new();
-
-    for (sql_id, block) in &blocks {
-        if let Err(e) = SafetyChecker::check(sql_id, &block.content) {
-            errors.push(format!(
-                "\n[{}] SQL 注入风险!\n  位置: {} 第 {} 行\n  内容: {}\n  建议: {}",
-                sql_file, e.sql_id, e.line, e.content, e.suggestion
-            ));
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "SQL 安全检查失败，发现 {} 处不安全代码:{}",
-            errors.len(),
-            errors.join("")
-        ))
-    }
-}
 
 /// Repository 属性参数
 struct RepositoryArgs {
@@ -101,37 +51,47 @@ impl Parse for RepositoryArgs {
                 sql_file = Some(lit.value());
             }
 
-            // 跳过可能的逗号
             let _ = input.parse::<Token![,]>();
         }
 
         Ok(RepositoryArgs {
-            sql_file: sql_file.ok_or_else(|| {
-                syn::Error::new(input.span(), "缺少 sql_file 属性")
-            })?,
+            sql_file: sql_file
+                .ok_or_else(|| syn::Error::new(input.span(), "缺少 sql_file 属性"))?,
         })
     }
 }
 
+/// 返回类型信息
+#[derive(Debug, Clone)]
+enum ReturnKind {
+    /// Vec<T> - 列表查询
+    List(Type),
+    /// Option<T> - 可选单条
+    Optional(Type),
+    /// T（非 Vec/Option）- 必须单条
+    One(Type),
+    /// i64 - 标量查询（如 COUNT）
+    Scalar,
+    /// u64 - 影响行数（INSERT/UPDATE/DELETE）
+    Affected,
+    /// () - 无返回
+    Unit,
+}
+
 /// 方法信息
-#[allow(dead_code)]
 struct MethodInfo {
-    /// 方法名（Rust 风格，snake_case）
-    name: String,
+    /// 方法名（snake_case）
+    name: Ident,
     /// SQL ID（camelCase）
     sql_id: String,
     /// 是否异步
     is_async: bool,
-    /// 参数列表（名称, 类型）
-    params: Vec<(String, String)>,
+    /// 参数列表（名称, 类型, 是否引用）
+    params: Vec<(Ident, Type, bool)>,
     /// 返回类型
-    return_type: String,
-    /// 是否返回列表
-    is_list: bool,
-    /// 是否返回 Option
-    is_option: bool,
-    /// 是否批量操作
-    is_batch: bool,
+    return_kind: ReturnKind,
+    /// 完整返回类型（用于签名）
+    return_type: Option<Type>,
 }
 
 /// 将 snake_case 转换为 camelCase
@@ -155,19 +115,145 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
-/// 解析返回类型
-fn parse_return_type(ty: &syn::Type) -> (String, bool, bool) {
-    let type_str = quote!(#ty).to_string();
-    let is_list = type_str.contains("Vec <") || type_str.contains("Vec<");
-    let is_option = type_str.contains("Option <") || type_str.contains("Option<");
-    (type_str, is_list, is_option)
+/// 检查 SQL 文件安全性
+fn check_sql_file_safety(sql_file: &str) -> Result<(), String> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .map_err(|_| "无法获取 CARGO_MANIFEST_DIR".to_string())?;
+
+    let file_path = PathBuf::from(&manifest_dir).join(sql_file);
+
+    let content = std::fs::read_to_string(&file_path).map_err(|e| {
+        format!(
+            "无法读取 SQL 文件 '{}': {}\n  完整路径: {}",
+            sql_file,
+            e,
+            file_path.display()
+        )
+    })?;
+
+    let blocks = parse_content(&content);
+
+    if blocks.is_empty() {
+        return Err(format!(
+            "SQL 文件 '{}' 中没有找到有效的 SQL 块",
+            sql_file
+        ));
+    }
+
+    let mut errors = Vec::new();
+
+    for (sql_id, block) in &blocks {
+        if let Err(e) = SafetyChecker::check(sql_id, &block.content) {
+            errors.push(format!(
+                "\n[{}] SQL 注入风险!\n  位置: {} 第 {} 行\n  内容: {}\n  建议: {}",
+                sql_file, e.sql_id, e.line, e.content, e.suggestion
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "SQL 安全检查失败，发现 {} 处不安全代码:{}",
+            errors.len(),
+            errors.join("")
+        ))
+    }
 }
 
-/// 检查是否是批量操作（参数包含 slice 或 Vec）
-fn is_batch_operation(params: &[(String, String)]) -> bool {
-    params.iter().any(|(_, ty)| {
-        ty.contains("& [") || ty.contains("&[") || ty.contains("Vec <") || ty.contains("Vec<")
-    })
+/// 解析返回类型
+fn parse_return_kind(ty: &Type) -> ReturnKind {
+    let _type_str = quote!(#ty).to_string().replace(' ', "");
+
+    // 检查 Result<T, E> 包装
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Result" {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return parse_inner_return_kind(inner_ty);
+                    }
+                }
+            }
+        }
+    }
+
+    parse_inner_return_kind(ty)
+}
+
+/// 解析内部返回类型（去掉 Result 包装后）
+fn parse_inner_return_kind(ty: &Type) -> ReturnKind {
+    let type_str = quote!(#ty).to_string().replace(' ', "");
+
+    // Vec<T>
+    if type_str.starts_with("Vec<") {
+        if let Type::Path(type_path) = ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return ReturnKind::List(inner_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Option<T>
+    if type_str.starts_with("Option<") {
+        if let Type::Path(type_path) = ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return ReturnKind::Optional(inner_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // i64 - 标量
+    if type_str == "i64" {
+        return ReturnKind::Scalar;
+    }
+
+    // u64 - 影响行数
+    if type_str == "u64" {
+        return ReturnKind::Affected;
+    }
+
+    // () - 无返回
+    if type_str == "()" {
+        return ReturnKind::Unit;
+    }
+
+    // 其他类型 - 单条查询
+    ReturnKind::One(ty.clone())
+}
+
+/// 解析参数（跳过 &self 和 db 参数）
+fn parse_params(method: &syn::TraitItemFn) -> Vec<(Ident, Type, bool)> {
+    method
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg {
+                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let param_name = pat_ident.ident.to_string();
+
+                    // 跳过 self 和 db 参数
+                    if param_name == "self" || param_name == "db" || param_name == "pool" {
+                        return None;
+                    }
+
+                    let is_ref = matches!(&*pat_type.ty, Type::Reference(_));
+                    return Some((pat_ident.ident.clone(), (*pat_type.ty).clone(), is_ref));
+                }
+            }
+            None
+        })
+        .collect()
 }
 
 /// 从 trait 解析方法信息
@@ -176,55 +262,267 @@ fn parse_methods(trait_item: &ItemTrait) -> Vec<MethodInfo> {
 
     for item in &trait_item.items {
         if let TraitItem::Fn(method) = item {
-            let name = method.sig.ident.to_string();
-            let sql_id = to_camel_case(&name);
+            let name = method.sig.ident.clone();
+            let sql_id = to_camel_case(&name.to_string());
             let is_async = method.sig.asyncness.is_some();
 
-            // 解析参数（跳过 &self 和执行器参数）
-            let params: Vec<(String, String)> = method
-                .sig
-                .inputs
-                .iter()
-                .filter_map(|arg| {
-                    if let syn::FnArg::Typed(pat_type) = arg {
-                        if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                            let param_name = pat_ident.ident.to_string();
-                            // 跳过 self 和 exec 参数
-                            if param_name != "self" && param_name != "exec" {
-                                let param_type = quote!(#pat_type.ty).to_string();
-                                return Some((param_name, param_type));
-                            }
-                        }
-                    }
-                    None
-                })
-                .collect();
+            let params = parse_params(method);
 
-            // 解析返回类型
-            let (return_type, is_list, is_option) = if let syn::ReturnType::Type(_, ty) =
-                &method.sig.output
-            {
-                parse_return_type(ty)
-            } else {
-                ("()".to_string(), false, false)
+            let (return_kind, return_type) = match &method.sig.output {
+                ReturnType::Type(_, ty) => (parse_return_kind(ty), Some((**ty).clone())),
+                ReturnType::Default => (ReturnKind::Unit, None),
             };
-
-            let is_batch = is_batch_operation(&params);
 
             methods.push(MethodInfo {
                 name,
                 sql_id,
                 is_async,
                 params,
+                return_kind,
                 return_type,
-                is_list,
-                is_option,
-                is_batch,
             });
         }
     }
 
     methods
+}
+
+/// 生成方法实现
+fn generate_method_impl(method: &MethodInfo) -> proc_macro2::TokenStream {
+    let method_name = &method.name;
+    let sql_id = &method.sql_id;
+
+    // 生成参数列表
+    let param_defs: Vec<_> = method
+        .params
+        .iter()
+        .map(|(name, ty, _)| {
+            quote! { #name: #ty }
+        })
+        .collect();
+
+    // 生成参数传递（用于构造参数结构体或直接传递）
+    let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
+
+    // 生成返回类型
+    let return_type = method.return_type.as_ref().map(|ty| quote! { -> #ty });
+
+    // 根据返回类型生成不同的实现
+    let body = match &method.return_kind {
+        ReturnKind::List(inner_ty) => {
+            if param_names.is_empty() {
+                quote! {
+                    markdown_sql::query_list::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &markdown_sql::EmptyParams,
+                    ).await.map_err(|e| e.into())
+                }
+            } else if param_names.len() == 1 {
+                let param = &param_names[0];
+                quote! {
+                    markdown_sql::query_list::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        #param,
+                    ).await.map_err(|e| e.into())
+                }
+            } else {
+                // 多个参数，使用 serde_json::json! 构造
+                let json_fields: Vec<_> = param_names
+                    .iter()
+                    .map(|name| {
+                        let key = name.to_string();
+                        quote! { #key: #name }
+                    })
+                    .collect();
+                quote! {
+                    markdown_sql::query_list::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &serde_json::json!({ #(#json_fields),* }),
+                    ).await.map_err(|e| e.into())
+                }
+            }
+        }
+        ReturnKind::Optional(inner_ty) => {
+            if param_names.is_empty() {
+                quote! {
+                    markdown_sql::query_optional::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &markdown_sql::EmptyParams,
+                    ).await.map_err(|e| e.into())
+                }
+            } else if param_names.len() == 1 {
+                let param = &param_names[0];
+                quote! {
+                    markdown_sql::query_optional::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        #param,
+                    ).await.map_err(|e| e.into())
+                }
+            } else {
+                let json_fields: Vec<_> = param_names
+                    .iter()
+                    .map(|name| {
+                        let key = name.to_string();
+                        quote! { #key: #name }
+                    })
+                    .collect();
+                quote! {
+                    markdown_sql::query_optional::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &serde_json::json!({ #(#json_fields),* }),
+                    ).await.map_err(|e| e.into())
+                }
+            }
+        }
+        ReturnKind::One(inner_ty) => {
+            if param_names.is_empty() {
+                quote! {
+                    markdown_sql::query_one::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &markdown_sql::EmptyParams,
+                    ).await.map_err(|e| e.into())
+                }
+            } else if param_names.len() == 1 {
+                let param = &param_names[0];
+                quote! {
+                    markdown_sql::query_one::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        #param,
+                    ).await.map_err(|e| e.into())
+                }
+            } else {
+                let json_fields: Vec<_> = param_names
+                    .iter()
+                    .map(|name| {
+                        let key = name.to_string();
+                        quote! { #key: #name }
+                    })
+                    .collect();
+                quote! {
+                    markdown_sql::query_one::<#inner_ty, _>(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &serde_json::json!({ #(#json_fields),* }),
+                    ).await.map_err(|e| e.into())
+                }
+            }
+        }
+        ReturnKind::Scalar => {
+            if param_names.is_empty() {
+                quote! {
+                    markdown_sql::query_scalar(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &markdown_sql::EmptyParams,
+                    ).await.map_err(|e| e.into())
+                }
+            } else if param_names.len() == 1 {
+                let param = &param_names[0];
+                quote! {
+                    markdown_sql::query_scalar(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        #param,
+                    ).await.map_err(|e| e.into())
+                }
+            } else {
+                let json_fields: Vec<_> = param_names
+                    .iter()
+                    .map(|name| {
+                        let key = name.to_string();
+                        quote! { #key: #name }
+                    })
+                    .collect();
+                quote! {
+                    markdown_sql::query_scalar(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &serde_json::json!({ #(#json_fields),* }),
+                    ).await.map_err(|e| e.into())
+                }
+            }
+        }
+        ReturnKind::Affected => {
+            if param_names.is_empty() {
+                quote! {
+                    markdown_sql::execute(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &markdown_sql::EmptyParams,
+                    ).await.map_err(|e| e.into())
+                }
+            } else if param_names.len() == 1 {
+                let param = &param_names[0];
+                quote! {
+                    markdown_sql::execute(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        #param,
+                    ).await.map_err(|e| e.into())
+                }
+            } else {
+                let json_fields: Vec<_> = param_names
+                    .iter()
+                    .map(|name| {
+                        let key = name.to_string();
+                        quote! { #key: #name }
+                    })
+                    .collect();
+                quote! {
+                    markdown_sql::execute(
+                        &self.manager,
+                        db,
+                        #sql_id,
+                        &serde_json::json!({ #(#json_fields),* }),
+                    ).await.map_err(|e| e.into())
+                }
+            }
+        }
+        ReturnKind::Unit => {
+            quote! {
+                Ok(())
+            }
+        }
+    };
+
+    // 生成异步标记
+    let async_token = if method.is_async {
+        quote! { async }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        pub #async_token fn #method_name(
+            &self,
+            db: &sqlx::Pool<sqlx::Sqlite>,
+            #(#param_defs),*
+        ) #return_type {
+            #body
+        }
+    }
 }
 
 /// Repository 属性宏
@@ -240,25 +538,39 @@ fn parse_methods(trait_item: &ItemTrait) -> Vec<MethodInfo> {
 /// ```ignore
 /// #[repository(sql_file = "sql/UserRepository.md")]
 /// pub trait UserRepository {
-///     async fn find_by_id(&self, id: i64) -> Option<User>;
+///     // 方法名自动映射到 SQL ID（snake_case → camelCase）
+///     // find_by_id → findById
+///     async fn find_by_id(&self, db: &Pool<Sqlite>, params: &IdParams) -> Result<Option<User>>;
+///
+///     // 无参数查询
+///     async fn get_count(&self, db: &Pool<Sqlite>) -> Result<i64>;
+///
+///     // 返回列表
+///     async fn find_all(&self, db: &Pool<Sqlite>) -> Result<Vec<User>>;
+///
+///     // 返回影响行数
+///     async fn insert(&self, db: &Pool<Sqlite>, user: &User) -> Result<u64>;
 /// }
 /// ```
 ///
 /// ## 生成的代码
 ///
 /// ```ignore
-/// pub struct UserRepositoryImpl<'a> {
-///     manager: &'a SqlManager,
+/// pub struct UserRepositoryImpl {
+///     manager: markdown_sql::SqlManager,
 /// }
 ///
-/// impl<'a> UserRepositoryImpl<'a> {
-///     pub fn new(manager: &'a SqlManager) -> Self {
+/// impl UserRepositoryImpl {
+///     pub fn new(manager: markdown_sql::SqlManager) -> Self {
 ///         Self { manager }
 ///     }
-///     
-///     pub async fn find_by_id(&self, id: i64) -> Option<User> {
-///         // 自动生成的实现
+///
+///     pub async fn find_by_id(&self, db: &Pool<Sqlite>, params: &IdParams) -> Result<Option<User>> {
+///         markdown_sql::query_optional::<User, _>(&self.manager, db, "findById", params)
+///             .await
+///             .map_err(|e| e.into())
 ///     }
+///     // ...
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -275,7 +587,6 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
     let methods = parse_methods(&trait_item);
 
     // ========== 编译时安全检查 ==========
-    // 读取 SQL 文件并检查不安全的模式
     if let Err(e) = check_sql_file_safety(sql_file) {
         return syn::Error::new_spanned(&trait_item.ident, e)
             .to_compile_error()
@@ -283,104 +594,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // 生成方法实现
-    let method_impls: Vec<_> = methods
-        .iter()
-        .map(|m| {
-            let method_name = format_ident!("{}", m.name);
-            let sql_id = &m.sql_id;
-
-            // 生成参数列表
-            let param_names: Vec<_> = m.params.iter().map(|(n, _)| format_ident!("{}", n)).collect();
-
-            // 生成 JSON 参数构建
-            let json_fields: Vec<_> = m
-                .params
-                .iter()
-                .map(|(n, _)| {
-                    let name = format_ident!("{}", n);
-                    let key = n.as_str();
-                    quote! { #key: #name }
-                })
-                .collect();
-
-            // 根据返回类型生成不同的实现
-            if m.is_batch {
-                // 批量操作
-                quote! {
-                    pub async fn #method_name<'e, E>(
-                        &self,
-                        exec: E,
-                        #(#param_names: impl serde::Serialize + Clone),*
-                    ) -> Result<u64, markdown_sql::MarkdownSqlError>
-                    where
-                        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-                    {
-                        // 批量操作实现
-                        let sql = self.manager.render(#sql_id, &serde_json::json!({}))?;
-                        let sql_result = markdown_sql::ParamExtractor::extract(&sql, self.manager.db_type());
-                        
-                        // TODO: 实现批量执行
-                        Ok(0)
-                    }
-                }
-            } else if m.return_type.contains("u64") || m.return_type.contains("i64") && !m.is_option {
-                // 返回影响行数（INSERT/UPDATE/DELETE）
-                quote! {
-                    pub async fn #method_name<'e, E>(
-                        &self,
-                        exec: E,
-                        #(#param_names: impl serde::Serialize),*
-                    ) -> Result<u64, markdown_sql::MarkdownSqlError>
-                    where
-                        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-                    {
-                        let params = serde_json::json!({ #(#json_fields),* });
-                        let sql = self.manager.render(#sql_id, &params)?;
-                        let sql_result = markdown_sql::ParamExtractor::extract(&sql, self.manager.db_type());
-                        
-                        if self.manager.is_debug() {
-                            tracing::debug!("Executing: {}\n  SQL: {}", #sql_id, sql_result.sql);
-                        }
-                        
-                        let result = sqlx::query(&sql_result.sql)
-                            .execute(exec)
-                            .await
-                            .map_err(markdown_sql::MarkdownSqlError::from)?;
-                        
-                        Ok(result.rows_affected())
-                    }
-                }
-            } else {
-                // 查询操作
-                quote! {
-                    pub async fn #method_name<'e, E, T>(
-                        &self,
-                        exec: E,
-                        #(#param_names: impl serde::Serialize),*
-                    ) -> Result<Vec<T>, markdown_sql::MarkdownSqlError>
-                    where
-                        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-                        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin,
-                    {
-                        let params = serde_json::json!({ #(#json_fields),* });
-                        let sql = self.manager.render(#sql_id, &params)?;
-                        let sql_result = markdown_sql::ParamExtractor::extract(&sql, self.manager.db_type());
-                        
-                        if self.manager.is_debug() {
-                            tracing::debug!("Executing: {}\n  SQL: {}", #sql_id, sql_result.sql);
-                        }
-                        
-                        let rows = sqlx::query_as::<_, T>(&sql_result.sql)
-                            .fetch_all(exec)
-                            .await
-                            .map_err(markdown_sql::MarkdownSqlError::from)?;
-                        
-                        Ok(rows)
-                    }
-                }
-            }
-        })
-        .collect();
+    let method_impls: Vec<_> = methods.iter().map(generate_method_impl).collect();
 
     // 生成完整代码
     let expanded = quote! {
@@ -388,13 +602,15 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
         #trait_item
 
         /// 自动生成的 Repository 实现
-        #vis struct #impl_name<'a> {
-            manager: &'a markdown_sql::SqlManager,
+        #vis struct #impl_name {
+            manager: &'static markdown_sql::SqlManager,
         }
 
-        impl<'a> #impl_name<'a> {
+        impl #impl_name {
             /// 创建新的 Repository 实例
-            pub fn new(manager: &'a markdown_sql::SqlManager) -> Self {
+            ///
+            /// 接受静态引用（通常来自 `Lazy<SqlManager>`）
+            pub fn new(manager: &'static markdown_sql::SqlManager) -> Self {
                 Self { manager }
             }
 
@@ -420,6 +636,7 @@ mod tests {
         assert_eq!(to_camel_case("find_all"), "findAll");
         assert_eq!(to_camel_case("insert"), "insert");
         assert_eq!(to_camel_case("batch_insert"), "batchInsert");
-        assert_eq!(to_camel_case("find_user_by_name_and_age"), "findUserByNameAndAge");
+        assert_eq!(to_camel_case("get_daily_stats"), "getDailyStats");
+        assert_eq!(to_camel_case("get_total_count"), "getTotalCount");
     }
 }
