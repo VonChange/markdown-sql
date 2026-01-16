@@ -77,6 +77,16 @@ struct RepositoryArgs {
     db_type: DbTypeArg,
 }
 
+/// 从 sql_file 路径提取命名空间
+/// 例如：`sql/PromoCodeRepository.md` -> `PromoCodeRepository`
+fn extract_namespace(sql_file: &str) -> String {
+    std::path::Path::new(sql_file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("default")
+        .to_string()
+}
+
 impl Parse for RepositoryArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut sql_file = None;
@@ -421,9 +431,10 @@ fn build_params_code(
 }
 
 /// 生成方法实现（简化版，使用 build_params_code）
-fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
+fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
     let method_name = &method.name;
-    let sql_id = &method.sql_id;
+    // 使用全限定名：Namespace.sqlId
+    let sql_id = format!("{}.{}", namespace, method.sql_id);
     let internal_mod = db_type.internal_module();
     let db_pool_trait = db_type.db_pool_trait();
 
@@ -515,7 +526,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2:
     // 如果标记了 #[transactional]，生成事务包装代码
     if method.is_transactional {
         // 生成事务版本的 body
-        let tx_body = generate_tx_body_for_transactional(method, db_type);
+        let tx_body = generate_tx_body_for_transactional(method, db_type, namespace);
         
         quote! {
             /// 自动事务方法：在事务中执行，成功自动提交，失败自动回滚
@@ -557,8 +568,9 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2:
 }
 
 /// 生成 #[transactional] 方法内部的事务操作代码
-fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
-    let sql_id = &method.sql_id;
+fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
+    // 使用全限定名：Namespace.sqlId
+    let sql_id = format!("{}.{}", namespace, method.sql_id);
     let internal_mod = db_type.internal_module();
 
     // 构建参数代码（使用结构体）
@@ -659,10 +671,11 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg) -
 }
 
 /// 生成事务版本方法实现（方法名_tx）- 简化版
-fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg) -> proc_macro2::TokenStream {
+fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
     let method_name = &method.name;
     let tx_method_name = format_ident!("{}_tx", method_name);
-    let sql_id = &method.sql_id;
+    // 使用全限定名：Namespace.sqlId
+    let sql_id = format!("{}.{}", namespace, method.sql_id);
     let internal_mod = db_type.internal_module();
 
     // 生成参数列表
@@ -893,17 +906,20 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let db_type = args.db_type;
+    
+    // 从 sql_file 提取命名空间（用于生成全限定 SQL ID）
+    let namespace = extract_namespace(sql_file);
 
     // 生成普通方法实现
     let method_impls: Vec<_> = methods
         .iter()
-        .map(|m| generate_method_impl(m, db_type))
+        .map(|m| generate_method_impl(m, db_type, &namespace))
         .collect();
 
     // 生成事务版本方法实现
     let tx_method_impls: Vec<_> = methods
         .iter()
-        .map(|m| generate_method_impl_tx(m, db_type))
+        .map(|m| generate_method_impl_tx(m, db_type, &namespace))
         .collect();
 
     let internal_mod = db_type.internal_module();
