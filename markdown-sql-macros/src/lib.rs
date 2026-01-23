@@ -462,7 +462,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
                     db,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Optional(inner_ty) => {
@@ -472,7 +472,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
                     db,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::One(inner_ty) => {
@@ -482,7 +482,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
                     db,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Scalar => {
@@ -492,7 +492,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
                     db,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Affected => {
@@ -502,7 +502,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
                     db,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Unit => {
@@ -584,7 +584,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                     &mut tx,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Optional(inner_ty) => {
@@ -595,7 +595,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                         &mut tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
@@ -603,7 +603,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                         &mut tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())?;
+                    ).await?;
                     Ok(result.into_iter().next())
                 },
             }
@@ -616,7 +616,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                         &mut tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
@@ -624,7 +624,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                         &mut tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())?;
+                    ).await?;
                     result.into_iter().next()
                         .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
                 },
@@ -638,7 +638,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                         &mut tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     Err(markdown_sql::MarkdownSqlError::not_supported(
@@ -655,7 +655,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                     &mut tx,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Unit => {
@@ -702,7 +702,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                     tx,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Optional(inner_ty) => {
@@ -713,7 +713,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                         tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
@@ -721,7 +721,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                         tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())?;
+                    ).await?;
                     Ok(result.into_iter().next())
                 },
             }
@@ -734,7 +734,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                         tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
@@ -742,7 +742,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                         tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())?;
+                    ).await?;
                     result.into_iter().next()
                         .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
                 },
@@ -756,7 +756,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                         tx,
                         #sql_id,
                         #params_expr,
-                    ).await.map_err(|e| e.into())
+                    ).await
                 },
                 _ => quote! {
                     // MySQL/PG 暂不支持 query_scalar_tx
@@ -774,7 +774,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                     tx,
                     #sql_id,
                     #params_expr,
-                ).await.map_err(|e| e.into())
+                ).await
             }
         }
         ReturnKind::Unit => {
