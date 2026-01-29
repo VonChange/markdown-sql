@@ -29,13 +29,11 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
         }
     };
 
-    // 收集字段信息
-    let field_names: Vec<_> = fields
+    // 收集字段名
+    let _field_names: Vec<_> = fields
         .iter()
         .filter_map(|f| f.ident.as_ref())
         .collect();
-
-    let field_name_strs: Vec<_> = field_names.iter().map(|n| n.to_string()).collect();
 
     // 检查是否有 Vec 类型的字段（用于 IN 查询）
     let vec_fields: Vec<_> = fields
