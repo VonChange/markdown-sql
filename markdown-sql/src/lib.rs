@@ -96,6 +96,7 @@ pub mod executor;
 pub mod manager;
 pub mod param_extractor;
 pub mod parser;
+pub mod typed_params;
 
 // ============================================================================
 // 数据库模块
@@ -129,9 +130,21 @@ pub use db::MySqlDbPool;
 #[cfg(feature = "postgres")]
 pub use db::PgDbPool;
 
-// 空参数结构体（公开导出）
+// 空参数结构体（公开导出，所有数据库 feature 可用）
+pub use typed_params::EmptyParams;
+
+// ============================================================================
+// TypedParams trait（类型感知参数绑定）
+// ============================================================================
+
+#[cfg(feature = "postgres")]
+pub use typed_params::TypedParamsPg;
+
+#[cfg(feature = "mysql")]
+pub use typed_params::TypedParamsMySql;
+
 #[cfg(feature = "sqlite")]
-pub use db::EmptyParams;
+pub use typed_params::TypedParamsSqlite;
 
 // ============================================================================
 // 内部模块（仅供宏使用，不要直接调用！）
@@ -155,6 +168,12 @@ pub mod __internal {
             // 事务版本
             batch_execute_tx, execute_tx, query_list_tx, query_one_tx, query_optional_tx,
             query_scalar_tx,
+            // Typed 版本（类型感知参数绑定）
+            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
+            query_scalar_typed,
+            // Typed 事务版本
+            execute_typed_tx, query_list_typed_tx, query_one_typed_tx, query_optional_typed_tx,
+            query_scalar_typed_tx,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Sqlite>;
@@ -169,6 +188,11 @@ pub mod __internal {
             query_scalar,
             // 事务版本
             execute_tx, query_list_tx,
+            // Typed 版本（类型感知参数绑定）
+            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
+            query_scalar_typed,
+            // Typed 事务版本
+            execute_typed_tx, query_list_typed_tx,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::MySql>;
@@ -183,6 +207,11 @@ pub mod __internal {
             query_scalar,
             // 事务版本
             execute_tx, query_list_tx,
+            // Typed 版本（类型感知参数绑定）
+            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
+            query_scalar_typed,
+            // Typed 事务版本
+            execute_typed_tx, query_list_typed_tx,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Postgres>;
@@ -216,6 +245,7 @@ pub use include_dir::{include_dir, Dir};
 /// ```
 pub use markdown_sql_macros::repository;
 pub use markdown_sql_macros::transactional;
+pub use markdown_sql_macros::TypedParams;
 
 /// 版本号
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

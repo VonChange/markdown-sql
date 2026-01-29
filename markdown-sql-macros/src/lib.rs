@@ -29,6 +29,7 @@ use syn::{
 
 mod parser;
 mod safety_checker;
+mod typed_params;
 
 use parser::parse_content;
 use safety_checker::SafetyChecker;
@@ -453,11 +454,12 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
     // 构建参数代码
     let (params_struct, params_expr) = build_params_code(method);
 
-    // 根据返回类型生成调用代码
+    // 根据返回类型生成调用代码（使用 typed 版本，支持类型感知参数绑定）
+    // 参数结构体需要 #[derive(Serialize, TypedParams)]
     let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
             quote! {
-                #internal_mod::query_list::<#inner_ty, _, _>(
+                #internal_mod::query_list_typed::<#inner_ty, _, _>(
                     &self.manager,
                     db,
                     #sql_id,
@@ -467,7 +469,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
         }
         ReturnKind::Optional(inner_ty) => {
             quote! {
-                #internal_mod::query_optional::<#inner_ty, _, _>(
+                #internal_mod::query_optional_typed::<#inner_ty, _, _>(
                     &self.manager,
                     db,
                     #sql_id,
@@ -477,7 +479,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
         }
         ReturnKind::One(inner_ty) => {
             quote! {
-                #internal_mod::query_one::<#inner_ty, _, _>(
+                #internal_mod::query_one_typed::<#inner_ty, _, _>(
                     &self.manager,
                     db,
                     #sql_id,
@@ -487,7 +489,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
         }
         ReturnKind::Scalar => {
             quote! {
-                #internal_mod::query_scalar(
+                #internal_mod::query_scalar_typed(
                     &self.manager,
                     db,
                     #sql_id,
@@ -497,7 +499,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
         }
         ReturnKind::Affected => {
             quote! {
-                #internal_mod::execute(
+                #internal_mod::execute_typed(
                     &self.manager,
                     db,
                     #sql_id,
@@ -576,10 +578,11 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
     // 构建参数代码（使用结构体）
     let (params_struct, params_expr) = build_params_code(method);
 
+    // 使用 typed 版本（类型感知参数绑定）
     let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
             quote! {
-                #internal_mod::query_list_tx::<#inner_ty, _>(
+                #internal_mod::query_list_typed_tx::<#inner_ty, _>(
                     &self.manager,
                     &mut tx,
                     #sql_id,
@@ -590,7 +593,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
         ReturnKind::Optional(inner_ty) => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_optional_tx::<#inner_ty, _>(
+                    #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
                         &self.manager,
                         &mut tx,
                         #sql_id,
@@ -598,7 +601,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                     ).await
                 },
                 _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
+                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
                         &self.manager,
                         &mut tx,
                         #sql_id,
@@ -611,7 +614,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
         ReturnKind::One(inner_ty) => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_one_tx::<#inner_ty, _>(
+                    #internal_mod::query_one_typed_tx::<#inner_ty, _>(
                         &self.manager,
                         &mut tx,
                         #sql_id,
@@ -619,7 +622,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                     ).await
                 },
                 _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
+                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
                         &self.manager,
                         &mut tx,
                         #sql_id,
@@ -633,7 +636,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
         ReturnKind::Scalar => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_scalar_tx(
+                    #internal_mod::query_scalar_typed_tx(
                         &self.manager,
                         &mut tx,
                         #sql_id,
@@ -642,7 +645,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                 },
                 _ => quote! {
                     Err(markdown_sql::MarkdownSqlError::not_supported(
-                        "query_scalar_tx",
+                        "query_scalar_typed_tx",
                         "事务中的标量查询暂不支持此数据库"
                     ))
                 },
@@ -650,7 +653,7 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
         }
         ReturnKind::Affected => {
             quote! {
-                #internal_mod::execute_tx(
+                #internal_mod::execute_typed_tx(
                     &self.manager,
                     &mut tx,
                     #sql_id,
@@ -693,11 +696,11 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
     // 构建参数代码（使用结构体）
     let (params_struct, params_expr) = build_params_code(method);
 
-    // 根据返回类型生成调用代码
+    // 根据返回类型生成调用代码（使用 typed 版本）
     let call_expr = match &method.return_kind {
         ReturnKind::List(inner_ty) => {
             quote! {
-                #internal_mod::query_list_tx::<#inner_ty, _>(
+                #internal_mod::query_list_typed_tx::<#inner_ty, _>(
                     &self.manager,
                     tx,
                     #sql_id,
@@ -708,7 +711,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
         ReturnKind::Optional(inner_ty) => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_optional_tx::<#inner_ty, _>(
+                    #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
                         &self.manager,
                         tx,
                         #sql_id,
@@ -716,7 +719,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                     ).await
                 },
                 _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
+                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
                         &self.manager,
                         tx,
                         #sql_id,
@@ -729,7 +732,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
         ReturnKind::One(inner_ty) => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_one_tx::<#inner_ty, _>(
+                    #internal_mod::query_one_typed_tx::<#inner_ty, _>(
                         &self.manager,
                         tx,
                         #sql_id,
@@ -737,7 +740,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                     ).await
                 },
                 _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_tx(
+                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
                         &self.manager,
                         tx,
                         #sql_id,
@@ -751,7 +754,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
         ReturnKind::Scalar => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_scalar_tx(
+                    #internal_mod::query_scalar_typed_tx(
                         &self.manager,
                         tx,
                         #sql_id,
@@ -759,9 +762,9 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                     ).await
                 },
                 _ => quote! {
-                    // MySQL/PG 暂不支持 query_scalar_tx
+                    // MySQL/PG 暂不支持 query_scalar_typed_tx
                     Err(markdown_sql::MarkdownSqlError::not_supported(
-                        "query_scalar_tx",
+                        "query_scalar_typed_tx",
                         "事务中的标量查询暂不支持此数据库"
                     ))
                 },
@@ -769,7 +772,7 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
         }
         ReturnKind::Affected => {
             quote! {
-                #internal_mod::execute_tx(
+                #internal_mod::execute_typed_tx(
                     &self.manager,
                     tx,
                     #sql_id,
@@ -1008,6 +1011,40 @@ pub fn transactional(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // 这是一个标记属性，由 #[repository] 宏解析
     // 此宏直接返回原始内容，不做任何修改
     item
+}
+
+/// 类型感知参数绑定 derive macro
+///
+/// 为参数结构体自动生成类型感知的绑定代码，避免通过 JSON 序列化丢失类型信息。
+///
+/// ## 示例
+///
+/// ```ignore
+/// use markdown_sql::TypedParams;
+/// use chrono::NaiveDateTime;
+///
+/// #[derive(Serialize, TypedParams)]
+/// struct LogInsert {
+///     log_path: String,
+///     expires_date: Option<NaiveDateTime>,  // 类型保留，正确绑定到 TIMESTAMP
+/// }
+/// ```
+///
+/// ## 生成的代码
+///
+/// 宏会为结构体生成 `TypedParamsPg`、`TypedParamsMySql`、`TypedParamsSqlite` 三个 trait 的实现，
+/// 根据编译时的 feature 标志条件编译。
+///
+/// ## 支持的特性
+///
+/// - 基本类型：String, i32, i64, f32, f64, bool
+/// - Option 包装：Option<T>
+/// - 时间类型：NaiveDateTime, NaiveDate, DateTime<Utc>（需要 chrono 库）
+/// - Vec 类型：用于 IN 查询的 `{{ list | bind_join(",") }}`
+#[proc_macro_derive(TypedParams)]
+pub fn derive_typed_params(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    typed_params::derive_typed_params_impl(input).into()
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@
 #![allow(async_fn_in_trait)]
 #![allow(private_interfaces)]
 
-use markdown_sql::{repository, DbType, PgDbPool, SqlManager};
+use markdown_sql::{repository, DbType, PgDbPool, SqlManager, TypedParams};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -31,7 +31,7 @@ struct User {
 }
 
 /// 用户插入参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct UserInsert {
     name: String,
     age: i32,
@@ -105,7 +105,7 @@ impl PgDbPool for TestDb {
 async fn setup_database() -> Option<TestDb> {
     let pool = PgPoolOptions::new()
         .max_connections(5)
-        .connect("postgres://postgres:root123@localhost:5432/testdb")
+        .connect("postgres://root:change2012@localhost:5432/testdb")
         .await
         .ok()?;
 

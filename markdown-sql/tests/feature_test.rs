@@ -15,7 +15,7 @@
 #![allow(async_fn_in_trait)]
 #![allow(private_interfaces)]
 
-use markdown_sql::{repository, transactional, DbType, MarkdownSqlError, SqliteDbPool, SqlManager};
+use markdown_sql::{repository, transactional, DbType, MarkdownSqlError, SqliteDbPool, SqlManager, TypedParams};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Pool, Sqlite, SqlitePool};
@@ -40,7 +40,7 @@ struct User {
 // ============================================================================
 
 /// 用户查询参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct UserQuery {
     name: Option<String>,
     status: Option<i32>,
@@ -48,7 +48,7 @@ struct UserQuery {
 }
 
 /// 用户插入参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct UserInsert {
     name: String,
     age: i32,
@@ -57,7 +57,7 @@ struct UserInsert {
 }
 
 /// 用户更新参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct UserUpdate {
     id: i64,
     name: String,
@@ -67,19 +67,19 @@ struct UserUpdate {
 }
 
 /// ID 参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct IdParams {
     id: i64,
 }
 
 /// IDs 参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct IdsParams {
     ids: Vec<i64>,
 }
 
 /// 统计参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct CountParams {
     status: Option<i32>,
 }

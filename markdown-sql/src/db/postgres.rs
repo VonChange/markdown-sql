@@ -130,6 +130,189 @@ where
 }
 
 // ============================================================================
+// Typed Pool 版本（类型感知参数绑定）
+// ============================================================================
+
+use crate::typed_params::TypedParamsPg;
+
+/// 查询列表（PostgreSQL，类型感知）
+pub async fn query_list_typed<T, P, D>(
+    manager: &SqlManager,
+    db: &D,
+    sql_id: &str,
+    params: &P,
+) -> Result<Vec<T>>
+where
+    T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+    P: Serialize + TypedParamsPg,
+    D: PgDbPool,
+{
+    // 1. 用 JSON 渲染模板、提取参数名
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    // 2. 使用 TypedParams 绑定（保留类型）
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    // 3. 执行查询
+    let rows = sqlx::query_as_with::<_, T, _>(&sql, args)
+        .fetch_all(db.pool())
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(rows)
+}
+
+/// 查询单条（PostgreSQL，可选，类型感知）
+pub async fn query_optional_typed<T, P, D>(
+    manager: &SqlManager,
+    db: &D,
+    sql_id: &str,
+    params: &P,
+) -> Result<Option<T>>
+where
+    T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+    P: Serialize + TypedParamsPg,
+    D: PgDbPool,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let row = sqlx::query_as_with::<_, T, _>(&sql, args)
+        .fetch_optional(db.pool())
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(row)
+}
+
+/// 查询单条（PostgreSQL，必须存在，类型感知）
+pub async fn query_one_typed<T, P, D>(
+    manager: &SqlManager,
+    db: &D,
+    sql_id: &str,
+    params: &P,
+) -> Result<T>
+where
+    T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+    P: Serialize + TypedParamsPg,
+    D: PgDbPool,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let row = sqlx::query_as_with::<_, T, _>(&sql, args)
+        .fetch_one(db.pool())
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(row)
+}
+
+/// 查询标量值（PostgreSQL，类型感知）
+pub async fn query_scalar_typed<P, D>(
+    manager: &SqlManager,
+    db: &D,
+    sql_id: &str,
+    params: &P,
+) -> Result<i64>
+where
+    P: Serialize + TypedParamsPg,
+    D: PgDbPool,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let row = sqlx::query_with(&sql, args)
+        .fetch_one(db.pool())
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(row.get::<i64, _>(0))
+}
+
+/// 执行更新（PostgreSQL，类型感知）
+pub async fn execute_typed<P, D>(
+    manager: &SqlManager,
+    db: &D,
+    sql_id: &str,
+    params: &P,
+) -> Result<u64>
+where
+    P: Serialize + TypedParamsPg,
+    D: PgDbPool,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let result = sqlx::query_with(&sql, args)
+        .execute(db.pool())
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(result.rows_affected())
+}
+
+// ============================================================================
+// Typed Transaction 版本（类型感知参数绑定）
+// ============================================================================
+
+/// 在事务中查询列表（PostgreSQL，类型感知）
+pub async fn query_list_typed_tx<'t, T, P>(
+    manager: &SqlManager,
+    tx: &mut Transaction<'t, Postgres>,
+    sql_id: &str,
+    params: &P,
+) -> Result<Vec<T>>
+where
+    T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+    P: Serialize + TypedParamsPg,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let rows = sqlx::query_as_with::<_, T, _>(&sql, args)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(rows)
+}
+
+/// 在事务中执行更新（PostgreSQL，类型感知）
+pub async fn execute_typed_tx<'t, P>(
+    manager: &SqlManager,
+    tx: &mut Transaction<'t, Postgres>,
+    sql_id: &str,
+    params: &P,
+) -> Result<u64>
+where
+    P: Serialize + TypedParamsPg,
+{
+    let (sql, param_names, _json_value) = prepare_sql(manager, sql_id, params)?;
+
+    let mut args = PgArguments::default();
+    params.bind_to_pg_args(&param_names, &mut args)?;
+
+    let result = sqlx::query_with(&sql, args)
+        .execute(&mut **tx)
+        .await
+        .map_err(MarkdownSqlError::from)?;
+
+    Ok(result.rows_affected())
+}
+
+// ============================================================================
 // Transaction 版本
 // ============================================================================
 
