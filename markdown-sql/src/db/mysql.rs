@@ -63,12 +63,7 @@ where
 }
 
 /// 查询单条（MySQL，必须存在）
-pub async fn query_one<T, P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<T>
+pub async fn query_one<T, P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<T>
 where
     T: for<'r> FromRow<'r, MySqlRow> + Send + Unpin,
     P: Serialize,
@@ -108,12 +103,7 @@ where
 }
 
 /// 执行更新（MySQL）
-pub async fn execute<P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<u64>
+pub async fn execute<P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<u64>
 where
     P: Serialize,
     D: MySqlDbPool,
@@ -400,10 +390,7 @@ where
 
 /// 开启事务（MySQL）
 pub async fn begin_transaction<D: MySqlDbPool>(db: &D) -> Result<Transaction<'static, MySql>> {
-    db.pool()
-        .begin()
-        .await
-        .map_err(MarkdownSqlError::from)
+    db.pool().begin().await.map_err(MarkdownSqlError::from)
 }
 
 // ============================================================================

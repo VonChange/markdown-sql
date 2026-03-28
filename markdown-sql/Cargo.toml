@@ -5,6 +5,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Markdown SQL 核心库 - SQL 解析、模板渲染、执行器"
+# 显式声明集成测试，便于对 MySQL/PostgreSQL 测试使用 required-features
+autotests = false
 
 [features]
 default = ["sqlite"]
@@ -48,3 +50,21 @@ markdown-sql-macros = { path = "../markdown-sql-macros" }
 tokio = { workspace = true }
 # 测试时启用所有数据库
 sqlx = { workspace = true, features = ["sqlite", "mysql", "postgres", "runtime-tokio"] }
+
+[[test]]
+name = "demo_test"
+path = "tests/demo_test.rs"
+
+[[test]]
+name = "feature_test"
+path = "tests/feature_test.rs"
+
+[[test]]
+name = "mysql_test"
+path = "tests/mysql_test.rs"
+required-features = ["mysql"]
+
+[[test]]
+name = "postgres_test"
+path = "tests/postgres_test.rs"
+required-features = ["postgres"]

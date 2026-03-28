@@ -85,12 +85,7 @@ where
 /// 查询单条（必须存在）
 ///
 /// 返回 `T`，不存在则报错
-pub async fn query_one<T, P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<T>
+pub async fn query_one<T, P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<T>
 where
     T: for<'r> FromRow<'r, SqliteRow> + Send + Unpin,
     P: Serialize,
@@ -134,12 +129,7 @@ where
 /// 执行更新（INSERT/UPDATE/DELETE）
 ///
 /// 返回影响行数
-pub async fn execute<P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<u64>
+pub async fn execute<P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<u64>
 where
     P: Serialize,
     D: DbPool,
@@ -645,10 +635,7 @@ where
 /// tx.commit().await?;
 /// ```
 pub async fn begin_transaction<D: DbPool>(db: &D) -> Result<Transaction<'static, Sqlite>> {
-    db.pool()
-        .begin()
-        .await
-        .map_err(MarkdownSqlError::from)
+    db.pool().begin().await.map_err(MarkdownSqlError::from)
 }
 
 /// 事务闭包执行
@@ -669,7 +656,9 @@ where
     D: DbPool,
     F: for<'t> FnOnce(
         &'t mut Transaction<'static, Sqlite>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send + 't>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<T>> + Send + 't>,
+    >,
 {
     let mut tx = db.pool().begin().await.map_err(MarkdownSqlError::from)?;
 
@@ -717,7 +706,10 @@ fn prepare_sql<P: Serialize>(
 }
 
 /// 从 JSON 构建 SQLite 参数
-pub(crate) fn build_arguments(param_names: &[String], json_value: &Value) -> Result<SqliteArguments<'static>> {
+pub(crate) fn build_arguments(
+    param_names: &[String],
+    json_value: &Value,
+) -> Result<SqliteArguments<'static>> {
     let mut args = SqliteArguments::default();
 
     for name in param_names {

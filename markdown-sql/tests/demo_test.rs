@@ -35,7 +35,7 @@ fn test_load_sql_file() {
     assert!(manager.contains("update"));
     assert!(manager.contains("deleteById"));
     assert!(manager.contains("count"));
-    
+
     println!("✅ SQL 文件加载成功");
 }
 

@@ -24,16 +24,12 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
             }
         },
         _ => {
-            return syn::Error::new_spanned(&input, "TypedParams 只支持结构体")
-                .to_compile_error();
+            return syn::Error::new_spanned(&input, "TypedParams 只支持结构体").to_compile_error();
         }
     };
 
     // 收集字段名
-    let _field_names: Vec<_> = fields
-        .iter()
-        .filter_map(|f| f.ident.as_ref())
-        .collect();
+    let _field_names: Vec<_> = fields.iter().filter_map(|f| f.ident.as_ref()).collect();
 
     // 检查是否有 Vec 类型的字段（用于 IN 查询）
     let vec_fields: Vec<_> = fields
@@ -51,7 +47,7 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
     // 生成普通字段的 match 分支（跳过 Vec 类型，Vec 通过 __bind_N 处理）
     let match_arms: Vec<_> = fields
         .iter()
-        .filter(|f| !is_vec_type(&f.ty))  // 跳过 Vec 类型
+        .filter(|f| !is_vec_type(&f.ty)) // 跳过 Vec 类型
         .filter_map(|f| {
             let name = f.ident.as_ref()?;
             let name_str = name.to_string();
@@ -98,11 +94,11 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
                 args: &mut sqlx::postgres::PgArguments,
             ) -> markdown_sql::Result<()> {
                 use sqlx::Arguments;
-                
+
                 for __name in param_names {
                     // 处理 IN 查询的 __bind_N 参数
                     #(#bind_handlers)*
-                    
+
                     // 处理普通字段
                     match __name.as_str() {
                         #(#match_arms)*
@@ -127,11 +123,11 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
                 args: &mut sqlx::sqlite::SqliteArguments<'__q>,
             ) -> markdown_sql::Result<()> {
                 use sqlx::Arguments;
-                
+
                 for __name in param_names {
                     // 处理 IN 查询的 __bind_N 参数
                     #(#bind_handlers)*
-                    
+
                     // 处理普通字段
                     match __name.as_str() {
                         #(#match_arms)*
@@ -155,11 +151,11 @@ pub fn derive_typed_params_impl(input: DeriveInput) -> TokenStream {
                 args: &mut sqlx::mysql::MySqlArguments,
             ) -> markdown_sql::Result<()> {
                 use sqlx::Arguments;
-                
+
                 for __name in param_names {
                     // 处理 IN 查询的 __bind_N 参数
                     #(#bind_handlers)*
-                    
+
                     // 处理普通字段
                     match __name.as_str() {
                         #(#match_arms)*

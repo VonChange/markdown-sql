@@ -15,7 +15,9 @@
 #![allow(async_fn_in_trait)]
 #![allow(private_interfaces)]
 
-use markdown_sql::{repository, transactional, DbType, MarkdownSqlError, SqliteDbPool, SqlManager, TypedParams};
+use markdown_sql::{
+    repository, transactional, DbType, MarkdownSqlError, SqlManager, SqliteDbPool, TypedParams,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Pool, Sqlite, SqlitePool};
@@ -98,9 +100,18 @@ pub trait FeatureTestRepository {
 
     // 查询
     async fn find_all(&self) -> Result<Vec<User>, markdown_sql::MarkdownSqlError>;
-    async fn find_by_id(&self, params: &IdParams) -> Result<Option<User>, markdown_sql::MarkdownSqlError>;
-    async fn find_by_condition(&self, params: &UserQuery) -> Result<Vec<User>, markdown_sql::MarkdownSqlError>;
-    async fn find_by_ids(&self, params: &IdsParams) -> Result<Vec<User>, markdown_sql::MarkdownSqlError>;
+    async fn find_by_id(
+        &self,
+        params: &IdParams,
+    ) -> Result<Option<User>, markdown_sql::MarkdownSqlError>;
+    async fn find_by_condition(
+        &self,
+        params: &UserQuery,
+    ) -> Result<Vec<User>, markdown_sql::MarkdownSqlError>;
+    async fn find_by_ids(
+        &self,
+        params: &IdsParams,
+    ) -> Result<Vec<User>, markdown_sql::MarkdownSqlError>;
 
     // 写入
     async fn insert(&self, params: &UserInsert) -> Result<u64, markdown_sql::MarkdownSqlError>;
@@ -194,22 +205,31 @@ async fn test_find_by_id() {
     let repo = get_repo();
 
     // 插入用户
-    repo.insert(&db, &UserInsert {
-        name: "李四".to_string(),
-        age: 30,
-        email: None,
-        status: 1,
-    }).await.expect("插入失败");
+    repo.insert(
+        &db,
+        &UserInsert {
+            name: "李四".to_string(),
+            age: 30,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("插入失败");
 
     // 根据 ID 查询
-    let user = repo.find_by_id(&db, &IdParams { id: 1 })
+    let user = repo
+        .find_by_id(&db, &IdParams { id: 1 })
         .await
         .expect("查询失败")
         .expect("用户不存在");
     assert_eq!(user.name, "李四");
 
     // 查询不存在的用户
-    let not_found = repo.find_by_id(&db, &IdParams { id: 999 }).await.expect("查询失败");
+    let not_found = repo
+        .find_by_id(&db, &IdParams { id: 999 })
+        .await
+        .expect("查询失败");
     assert!(not_found.is_none());
 
     println!("✅ 根据 ID 查询测试通过");
@@ -222,28 +242,45 @@ async fn test_dynamic_sql() {
 
     // 插入多个用户
     for i in 0..5 {
-        repo.insert(&db, &UserInsert {
-            name: format!("用户{}", i),
-            age: 20 + i,
-            email: None,
-            status: if i % 2 == 0 { 1 } else { 0 },
-        }).await.expect("插入失败");
+        repo.insert(
+            &db,
+            &UserInsert {
+                name: format!("用户{}", i),
+                age: 20 + i,
+                email: None,
+                status: if i % 2 == 0 { 1 } else { 0 },
+            },
+        )
+        .await
+        .expect("插入失败");
     }
 
     // 按状态查询
-    let active_users = repo.find_by_condition(&db, &UserQuery {
-        name: None,
-        status: Some(1),
-        min_age: None,
-    }).await.expect("查询失败");
+    let active_users = repo
+        .find_by_condition(
+            &db,
+            &UserQuery {
+                name: None,
+                status: Some(1),
+                min_age: None,
+            },
+        )
+        .await
+        .expect("查询失败");
     assert_eq!(active_users.len(), 3, "应该有 3 个激活用户");
 
     // 按年龄查询
-    let older_users = repo.find_by_condition(&db, &UserQuery {
-        name: None,
-        status: None,
-        min_age: Some(23),
-    }).await.expect("查询失败");
+    let older_users = repo
+        .find_by_condition(
+            &db,
+            &UserQuery {
+                name: None,
+                status: None,
+                min_age: Some(23),
+            },
+        )
+        .await
+        .expect("查询失败");
     assert_eq!(older_users.len(), 2, "应该有 2 个 >= 23 岁的用户");
 
     println!("✅ 动态 SQL 测试通过");
@@ -256,16 +293,22 @@ async fn test_in_query() {
 
     // 插入多个用户
     for i in 1..=5 {
-        repo.insert(&db, &UserInsert {
-            name: format!("用户{}", i),
-            age: 20 + i,
-            email: None,
-            status: 1,
-        }).await.expect("插入失败");
+        repo.insert(
+            &db,
+            &UserInsert {
+                name: format!("用户{}", i),
+                age: 20 + i,
+                email: None,
+                status: 1,
+            },
+        )
+        .await
+        .expect("插入失败");
     }
 
     // IN 查询
-    let users = repo.find_by_ids(&db, &IdsParams { ids: vec![1, 3, 5] })
+    let users = repo
+        .find_by_ids(&db, &IdsParams { ids: vec![1, 3, 5] })
         .await
         .expect("查询失败");
     assert_eq!(users.len(), 3);
@@ -277,7 +320,7 @@ async fn test_in_query() {
 }
 
 /// 对象参数查询示例
-/// 
+///
 /// 展示如何使用对象作为查询参数：
 /// - 单字段对象（IdParams）
 /// - 多字段查询对象（UserQuery）
@@ -318,7 +361,8 @@ async fn test_object_params_query() {
     // 2. 单字段对象查询：IdParams
     // ========================================
     let id_params = IdParams { id: 1 };
-    let user = repo.find_by_id(&db, &id_params)
+    let user = repo
+        .find_by_id(&db, &id_params)
         .await
         .expect("查询失败")
         .expect("用户不存在");
@@ -327,14 +371,15 @@ async fn test_object_params_query() {
     // ========================================
     // 3. 多字段对象查询：UserQuery
     // ========================================
-    
+
     // 3.1 按状态查询
     let query_by_status = UserQuery {
         name: None,
         status: Some(1),
         min_age: None,
     };
-    let active_users = repo.find_by_condition(&db, &query_by_status)
+    let active_users = repo
+        .find_by_condition(&db, &query_by_status)
         .await
         .expect("查询失败");
     assert_eq!(active_users.len(), 2, "激活用户应该有 2 个");
@@ -345,7 +390,8 @@ async fn test_object_params_query() {
         status: None,
         min_age: Some(25),
     };
-    let older_users = repo.find_by_condition(&db, &query_by_age)
+    let older_users = repo
+        .find_by_condition(&db, &query_by_age)
         .await
         .expect("查询失败");
     assert_eq!(older_users.len(), 2, ">= 25 岁应该有 2 个");
@@ -356,7 +402,8 @@ async fn test_object_params_query() {
         status: Some(1),
         min_age: Some(26),
     };
-    let filtered_users = repo.find_by_condition(&db, &combined_query)
+    let filtered_users = repo
+        .find_by_condition(&db, &combined_query)
         .await
         .expect("查询失败");
     assert_eq!(filtered_users.len(), 1, "激活且 >= 26 岁应该有 1 个");
@@ -366,9 +413,7 @@ async fn test_object_params_query() {
     // 4. 列表对象查询：IdsParams
     // ========================================
     let ids_params = IdsParams { ids: vec![1, 3] };
-    let users_by_ids = repo.find_by_ids(&db, &ids_params)
-        .await
-        .expect("查询失败");
+    let users_by_ids = repo.find_by_ids(&db, &ids_params).await.expect("查询失败");
     assert_eq!(users_by_ids.len(), 2);
 
     // ========================================
@@ -384,7 +429,8 @@ async fn test_object_params_query() {
     repo.update(&db, &update_params).await.expect("更新失败");
 
     // 验证更新
-    let updated_user = repo.find_by_id(&db, &IdParams { id: 1 })
+    let updated_user = repo
+        .find_by_id(&db, &IdParams { id: 1 })
         .await
         .expect("查询失败")
         .expect("用户不存在");
@@ -411,24 +457,35 @@ async fn test_update() {
     let repo = get_repo();
 
     // 插入用户
-    repo.insert(&db, &UserInsert {
-        name: "原名".to_string(),
-        age: 25,
-        email: None,
-        status: 1,
-    }).await.expect("插入失败");
+    repo.insert(
+        &db,
+        &UserInsert {
+            name: "原名".to_string(),
+            age: 25,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("插入失败");
 
     // 更新用户
-    repo.update(&db, &UserUpdate {
-        id: 1,
-        name: "新名".to_string(),
-        age: 26,
-        email: Some("new@example.com".to_string()),
-        status: 1,
-    }).await.expect("更新失败");
+    repo.update(
+        &db,
+        &UserUpdate {
+            id: 1,
+            name: "新名".to_string(),
+            age: 26,
+            email: Some("new@example.com".to_string()),
+            status: 1,
+        },
+    )
+    .await
+    .expect("更新失败");
 
     // 验证
-    let user = repo.find_by_id(&db, &IdParams { id: 1 })
+    let user = repo
+        .find_by_id(&db, &IdParams { id: 1 })
         .await
         .expect("查询失败")
         .expect("用户不存在");
@@ -444,18 +501,28 @@ async fn test_delete() {
     let repo = get_repo();
 
     // 插入用户
-    repo.insert(&db, &UserInsert {
-        name: "待删除".to_string(),
-        age: 25,
-        email: None,
-        status: 1,
-    }).await.expect("插入失败");
+    repo.insert(
+        &db,
+        &UserInsert {
+            name: "待删除".to_string(),
+            age: 25,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("插入失败");
 
     // 删除
-    repo.delete_by_id(&db, &IdParams { id: 1 }).await.expect("删除失败");
+    repo.delete_by_id(&db, &IdParams { id: 1 })
+        .await
+        .expect("删除失败");
 
     // 验证
-    let user = repo.find_by_id(&db, &IdParams { id: 1 }).await.expect("查询失败");
+    let user = repo
+        .find_by_id(&db, &IdParams { id: 1 })
+        .await
+        .expect("查询失败");
     assert!(user.is_none());
 
     println!("✅ 删除测试通过");
@@ -468,20 +535,31 @@ async fn test_count() {
 
     // 插入多个用户
     for i in 0..5 {
-        repo.insert(&db, &UserInsert {
-            name: format!("用户{}", i),
-            age: 20 + i,
-            email: None,
-            status: if i % 2 == 0 { 1 } else { 0 },
-        }).await.expect("插入失败");
+        repo.insert(
+            &db,
+            &UserInsert {
+                name: format!("用户{}", i),
+                age: 20 + i,
+                email: None,
+                status: if i % 2 == 0 { 1 } else { 0 },
+            },
+        )
+        .await
+        .expect("插入失败");
     }
 
     // 统计所有
-    let total = repo.count(&db, &CountParams { status: None }).await.expect("统计失败");
+    let total = repo
+        .count(&db, &CountParams { status: None })
+        .await
+        .expect("统计失败");
     assert_eq!(total, 5);
 
     // 统计激活用户
-    let active = repo.count(&db, &CountParams { status: Some(1) }).await.expect("统计失败");
+    let active = repo
+        .count(&db, &CountParams { status: Some(1) })
+        .await
+        .expect("统计失败");
     assert_eq!(active, 3);
 
     println!("✅ 统计测试通过");
@@ -494,12 +572,17 @@ async fn test_batch_insert() {
 
     // 批量插入（通过循环调用）
     for i in 0..10 {
-        repo.insert(&db, &UserInsert {
-            name: format!("批量用户{}", i),
-            age: 20 + i,
-            email: None,
-            status: 1,
-        }).await.expect("插入失败");
+        repo.insert(
+            &db,
+            &UserInsert {
+                name: format!("批量用户{}", i),
+                age: 20 + i,
+                email: None,
+                status: 1,
+            },
+        )
+        .await
+        .expect("插入失败");
     }
 
     // 验证
@@ -522,19 +605,29 @@ async fn test_transaction_commit() {
     let mut tx = repo.begin_transaction(&db).await.expect("开启事务失败");
 
     // 在事务中插入
-    repo.insert_tx(&mut tx, &UserInsert {
-        name: "事务用户1".to_string(),
-        age: 25,
-        email: None,
-        status: 1,
-    }).await.expect("事务插入失败");
+    repo.insert_tx(
+        &mut tx,
+        &UserInsert {
+            name: "事务用户1".to_string(),
+            age: 25,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("事务插入失败");
 
-    repo.insert_tx(&mut tx, &UserInsert {
-        name: "事务用户2".to_string(),
-        age: 30,
-        email: None,
-        status: 1,
-    }).await.expect("事务插入失败");
+    repo.insert_tx(
+        &mut tx,
+        &UserInsert {
+            name: "事务用户2".to_string(),
+            age: 30,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("事务插入失败");
 
     // 提交事务
     tx.commit().await.expect("提交事务失败");
@@ -552,23 +645,33 @@ async fn test_transaction_rollback() {
     let repo = get_repo();
 
     // 先插入一条数据
-    repo.insert(&db, &UserInsert {
-        name: "初始用户".to_string(),
-        age: 20,
-        email: None,
-        status: 1,
-    }).await.expect("插入失败");
+    repo.insert(
+        &db,
+        &UserInsert {
+            name: "初始用户".to_string(),
+            age: 20,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("插入失败");
 
     // 开启事务
     let mut tx = repo.begin_transaction(&db).await.expect("开启事务失败");
 
     // 在事务中插入
-    repo.insert_tx(&mut tx, &UserInsert {
-        name: "事务用户".to_string(),
-        age: 25,
-        email: None,
-        status: 1,
-    }).await.expect("事务插入失败");
+    repo.insert_tx(
+        &mut tx,
+        &UserInsert {
+            name: "事务用户".to_string(),
+            age: 25,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("事务插入失败");
 
     // 回滚事务
     tx.rollback().await.expect("回滚事务失败");
@@ -590,12 +693,17 @@ async fn test_transaction_query() {
     let mut tx = repo.begin_transaction(&db).await.expect("开启事务失败");
 
     // 插入数据
-    repo.insert_tx(&mut tx, &UserInsert {
-        name: "事务查询用户".to_string(),
-        age: 25,
-        email: None,
-        status: 1,
-    }).await.expect("插入失败");
+    repo.insert_tx(
+        &mut tx,
+        &UserInsert {
+            name: "事务查询用户".to_string(),
+            age: 25,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("插入失败");
 
     // 在事务中查询（应该能看到未提交的数据）
     let users = repo.find_all_tx(&mut tx).await.expect("事务查询失败");
@@ -632,12 +740,17 @@ async fn test_transactional_attribute() {
     let repo = get_transactional_repo();
 
     // 使用 #[transactional] 标记的方法（自动事务）
-    repo.insert(&db, &UserInsert {
-        name: "自动事务用户".to_string(),
-        age: 30,
-        email: None,
-        status: 1,
-    }).await.expect("自动事务插入失败");
+    repo.insert(
+        &db,
+        &UserInsert {
+            name: "自动事务用户".to_string(),
+            age: 30,
+            email: None,
+            status: 1,
+        },
+    )
+    .await
+    .expect("自动事务插入失败");
 
     // 验证
     let users = repo.find_all(&db).await.expect("查询失败");

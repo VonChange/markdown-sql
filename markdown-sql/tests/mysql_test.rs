@@ -11,7 +11,7 @@
 #![allow(async_fn_in_trait)]
 #![allow(private_interfaces)]
 
-use markdown_sql::{repository, DbType, MySqlDbPool, SqlManager};
+use markdown_sql::{repository, DbType, MySqlDbPool, SqlManager, TypedParams};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlPoolOptions;
@@ -31,7 +31,7 @@ struct User {
 }
 
 /// 用户插入参数
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TypedParams)]
 struct UserInsert {
     name: String,
     age: i32,

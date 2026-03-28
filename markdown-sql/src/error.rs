@@ -19,7 +19,6 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum MarkdownSqlError {
     // ============ 文件相关 ============
-
     /// 文件未找到
     #[error("文件未找到: {path}")]
     FileNotFound {
@@ -37,7 +36,6 @@ pub enum MarkdownSqlError {
     },
 
     // ============ SQL 相关 ============
-
     /// SQL 未找到
     #[error("SQL 未找到: {sql_id} (文件: {file})")]
     SqlNotFound {
@@ -66,7 +64,6 @@ pub enum MarkdownSqlError {
     },
 
     // ============ 参数相关 ============
-
     /// 参数缺失
     #[error("参数缺失: SQL '{sql_id}' 需要参数 '{param}'")]
     ParamMissing {
@@ -92,7 +89,6 @@ pub enum MarkdownSqlError {
     ParamError(String),
 
     // ============ 数据库相关 ============
-
     /// SQL 执行错误
     #[error("SQL 执行错误: {0}")]
     SqlxError(#[from] sqlx::Error),
@@ -111,7 +107,6 @@ pub enum MarkdownSqlError {
     ConnectionError(String),
 
     // ============ 查询结果相关 ============
-
     /// 记录不存在
     #[error("记录不存在: {sql_id}")]
     NotFound {
@@ -127,7 +122,6 @@ pub enum MarkdownSqlError {
     },
 
     // ============ 安全相关 ============
-
     /// 安全检查错误（编译时检测到不安全语法）
     #[error("SQL 安全检查失败: {sql_id} 第 {line} 行\n  内容: {content}\n  建议: {suggestion}")]
     UnsafeSql {
@@ -142,7 +136,6 @@ pub enum MarkdownSqlError {
     },
 
     // ============ 其他 ============
-
     /// IO 错误
     #[error("IO 错误: {0}")]
     IoError(#[from] std::io::Error),

@@ -163,17 +163,33 @@ pub mod __internal {
     pub mod sqlite {
         pub use crate::db::sqlite::{
             // 普通版本
-            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
-            query_scalar, with_transaction,
+            batch_execute,
             // 事务版本
-            batch_execute_tx, execute_tx, query_list_tx, query_one_tx, query_optional_tx,
-            query_scalar_tx,
+            batch_execute_tx,
+            begin_transaction,
+            execute,
+            execute_tx,
             // Typed 版本（类型感知参数绑定）
-            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
-            query_scalar_typed,
+            execute_typed,
             // Typed 事务版本
-            execute_typed_tx, query_list_typed_tx, query_one_typed_tx, query_optional_typed_tx,
+            execute_typed_tx,
+            query_list,
+            query_list_tx,
+            query_list_typed,
+            query_list_typed_tx,
+            query_one,
+            query_one_tx,
+            query_one_typed,
+            query_one_typed_tx,
+            query_optional,
+            query_optional_tx,
+            query_optional_typed,
+            query_optional_typed_tx,
+            query_scalar,
+            query_scalar_tx,
+            query_scalar_typed,
             query_scalar_typed_tx,
+            with_transaction,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Sqlite>;
@@ -184,15 +200,25 @@ pub mod __internal {
     pub mod mysql {
         pub use crate::db::mysql::{
             // 普通版本
-            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
-            query_scalar,
+            batch_execute,
+            begin_transaction,
+            execute,
             // 事务版本
-            execute_tx, query_list_tx,
+            execute_tx,
             // Typed 版本（类型感知参数绑定）
-            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
-            query_scalar_typed,
+            execute_typed,
             // Typed 事务版本
-            execute_typed_tx, query_list_typed_tx,
+            execute_typed_tx,
+            query_list,
+            query_list_tx,
+            query_list_typed,
+            query_list_typed_tx,
+            query_one,
+            query_one_typed,
+            query_optional,
+            query_optional_typed,
+            query_scalar,
+            query_scalar_typed,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::MySql>;
@@ -203,15 +229,25 @@ pub mod __internal {
     pub mod postgres {
         pub use crate::db::postgres::{
             // 普通版本
-            batch_execute, begin_transaction, execute, query_list, query_one, query_optional,
-            query_scalar,
+            batch_execute,
+            begin_transaction,
+            execute,
             // 事务版本
-            execute_tx, query_list_tx,
+            execute_tx,
             // Typed 版本（类型感知参数绑定）
-            execute_typed, query_list_typed, query_one_typed, query_optional_typed,
-            query_scalar_typed,
+            execute_typed,
             // Typed 事务版本
-            execute_typed_tx, query_list_typed_tx,
+            execute_typed_tx,
+            query_list,
+            query_list_tx,
+            query_list_typed,
+            query_list_typed_tx,
+            query_one,
+            query_one_typed,
+            query_optional,
+            query_optional_typed,
+            query_scalar,
+            query_scalar_typed,
         };
         // 事务类型
         pub type Transaction<'t> = sqlx::Transaction<'t, sqlx::Postgres>;

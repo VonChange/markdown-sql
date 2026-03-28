@@ -63,12 +63,7 @@ where
 }
 
 /// 查询单条（PostgreSQL，必须存在）
-pub async fn query_one<T, P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<T>
+pub async fn query_one<T, P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<T>
 where
     T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
     P: Serialize,
@@ -108,12 +103,7 @@ where
 }
 
 /// 执行更新（PostgreSQL）
-pub async fn execute<P, D>(
-    manager: &SqlManager,
-    db: &D,
-    sql_id: &str,
-    params: &P,
-) -> Result<u64>
+pub async fn execute<P, D>(manager: &SqlManager, db: &D, sql_id: &str, params: &P) -> Result<u64>
 where
     P: Serialize,
     D: PgDbPool,
@@ -403,10 +393,7 @@ where
 
 /// 开启事务（PostgreSQL）
 pub async fn begin_transaction<D: PgDbPool>(db: &D) -> Result<Transaction<'static, Postgres>> {
-    db.pool()
-        .begin()
-        .await
-        .map_err(MarkdownSqlError::from)
+    db.pool().begin().await.map_err(MarkdownSqlError::from)
 }
 
 // ============================================================================

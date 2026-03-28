@@ -7,14 +7,10 @@ use regex::Regex;
 use std::collections::HashMap;
 
 /// SQL 代码块正则
-static SQL_BLOCK_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"```sql\s*\n([\s\S]*?)```").unwrap()
-});
+static SQL_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"```sql\s*\n([\s\S]*?)```").unwrap());
 
 /// SQL ID 正则（-- sqlId 格式）
-static SQL_ID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^--\s*(\w+)\s*$").unwrap()
-});
+static SQL_ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^--\s*(\w+)\s*$").unwrap());
 
 /// SQL 块
 #[derive(Debug, Clone)]
@@ -33,7 +29,7 @@ pub fn parse_content(content: &str) -> HashMap<String, SqlBlock> {
     for cap in SQL_BLOCK_RE.captures_iter(content) {
         if let Some(block_content) = cap.get(1) {
             let content = block_content.as_str();
-            
+
             // 提取 SQL ID
             if let Some(sql_id) = extract_sql_id(content) {
                 // 去掉第一行（SQL ID 注释）

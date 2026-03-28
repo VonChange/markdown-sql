@@ -103,10 +103,7 @@ impl Parse for RepositoryArgs {
             } else if ident == "db_type" {
                 let lit: LitStr = input.parse()?;
                 db_type = DbTypeArg::from_str(&lit.value()).ok_or_else(|| {
-                    syn::Error::new(
-                        lit.span(),
-                        "无效的 db_type，支持: sqlite, mysql, postgres",
-                    )
+                    syn::Error::new(lit.span(), "无效的 db_type，支持: sqlite, mysql, postgres")
                 })?;
             }
 
@@ -215,10 +212,7 @@ fn check_sql_file_safety(sql_file: &str) -> Result<(), String> {
     let blocks = parse_content(&content);
 
     if blocks.is_empty() {
-        return Err(format!(
-            "SQL 文件 '{}' 中没有找到有效的 SQL 块",
-            sql_file
-        ));
+        return Err(format!("SQL 文件 '{}' 中没有找到有效的 SQL 块", sql_file));
     }
 
     let mut errors = Vec::new();
@@ -355,9 +349,10 @@ fn parse_methods(trait_item: &ItemTrait) -> Vec<MethodInfo> {
             };
 
             // 检查是否有 #[transactional] 属性
-            let is_transactional = method.attrs.iter().any(|attr| {
-                attr.path().is_ident("transactional")
-            });
+            let is_transactional = method
+                .attrs
+                .iter()
+                .any(|attr| attr.path().is_ident("transactional"));
 
             methods.push(MethodInfo {
                 name,
@@ -379,9 +374,7 @@ fn parse_methods(trait_item: &ItemTrait) -> Vec<MethodInfo> {
 /// - 0 个参数：使用 EmptyParams
 /// - 1 个参数：直接传递
 /// - 多个参数：生成内部结构体（避免使用 json!）
-fn build_params_code(
-    method: &MethodInfo,
-) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+fn build_params_code(method: &MethodInfo) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let param_names: Vec<_> = method.params.iter().map(|(name, _, _)| name).collect();
 
     if param_names.is_empty() {
@@ -432,7 +425,11 @@ fn build_params_code(
 }
 
 /// 生成方法实现（简化版，使用 build_params_code）
-fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
+fn generate_method_impl(
+    method: &MethodInfo,
+    db_type: DbTypeArg,
+    namespace: &str,
+) -> proc_macro2::TokenStream {
     let method_name = &method.name;
     // 使用全限定名：Namespace.sqlId
     let sql_id = format!("{}.{}", namespace, method.sql_id);
@@ -529,7 +526,7 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
     if method.is_transactional {
         // 生成事务版本的 body
         let tx_body = generate_tx_body_for_transactional(method, db_type, namespace);
-        
+
         quote! {
             /// 自动事务方法：在事务中执行，成功自动提交，失败自动回滚
             pub #async_token fn #method_name<D: #db_pool_trait>(
@@ -539,10 +536,10 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
             ) #return_type {
                 // 开启事务
                 let mut tx = #internal_mod::begin_transaction(db).await?;
-                
+
                 // 执行操作
                 let result = { #tx_body };
-                
+
                 // 根据结果提交或回滚
                 match result {
                     Ok(value) => {
@@ -570,7 +567,11 @@ fn generate_method_impl(method: &MethodInfo, db_type: DbTypeArg, namespace: &str
 }
 
 /// 生成 #[transactional] 方法内部的事务操作代码
-fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
+fn generate_tx_body_for_transactional(
+    method: &MethodInfo,
+    db_type: DbTypeArg,
+    namespace: &str,
+) -> proc_macro2::TokenStream {
     // 使用全限定名：Namespace.sqlId
     let sql_id = format!("{}.{}", namespace, method.sql_id);
     let internal_mod = db_type.internal_module();
@@ -590,67 +591,61 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
                 ).await
             }
         }
-        ReturnKind::Optional(inner_ty) => {
-            match db_type {
-                DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
-                        &self.manager,
-                        &mut tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await
-                },
-                _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
-                        &self.manager,
-                        &mut tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await?;
-                    Ok(result.into_iter().next())
-                },
-            }
-        }
-        ReturnKind::One(inner_ty) => {
-            match db_type {
-                DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_one_typed_tx::<#inner_ty, _>(
-                        &self.manager,
-                        &mut tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await
-                },
-                _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
-                        &self.manager,
-                        &mut tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await?;
-                    result.into_iter().next()
-                        .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
-                },
-            }
-        }
-        ReturnKind::Scalar => {
-            match db_type {
-                DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_scalar_typed_tx(
-                        &self.manager,
-                        &mut tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await
-                },
-                _ => quote! {
-                    Err(markdown_sql::MarkdownSqlError::not_supported(
-                        "query_scalar_typed_tx",
-                        "事务中的标量查询暂不支持此数据库"
-                    ))
-                },
-            }
-        }
+        ReturnKind::Optional(inner_ty) => match db_type {
+            DbTypeArg::Sqlite => quote! {
+                #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
+                    &self.manager,
+                    &mut tx,
+                    #sql_id,
+                    #params_expr,
+                ).await
+            },
+            _ => quote! {
+                let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
+                    &self.manager,
+                    &mut tx,
+                    #sql_id,
+                    #params_expr,
+                ).await?;
+                Ok(result.into_iter().next())
+            },
+        },
+        ReturnKind::One(inner_ty) => match db_type {
+            DbTypeArg::Sqlite => quote! {
+                #internal_mod::query_one_typed_tx::<#inner_ty, _>(
+                    &self.manager,
+                    &mut tx,
+                    #sql_id,
+                    #params_expr,
+                ).await
+            },
+            _ => quote! {
+                let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
+                    &self.manager,
+                    &mut tx,
+                    #sql_id,
+                    #params_expr,
+                ).await?;
+                result.into_iter().next()
+                    .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
+            },
+        },
+        ReturnKind::Scalar => match db_type {
+            DbTypeArg::Sqlite => quote! {
+                #internal_mod::query_scalar_typed_tx(
+                    &self.manager,
+                    &mut tx,
+                    #sql_id,
+                    #params_expr,
+                ).await
+            },
+            _ => quote! {
+                Err(markdown_sql::MarkdownSqlError::not_supported(
+                    "query_scalar_typed_tx",
+                    "事务中的标量查询暂不支持此数据库"
+                ))
+            },
+        },
         ReturnKind::Affected => {
             quote! {
                 #internal_mod::execute_typed_tx(
@@ -674,7 +669,11 @@ fn generate_tx_body_for_transactional(method: &MethodInfo, db_type: DbTypeArg, n
 }
 
 /// 生成事务版本方法实现（方法名_tx）- 简化版
-fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &str) -> proc_macro2::TokenStream {
+fn generate_method_impl_tx(
+    method: &MethodInfo,
+    db_type: DbTypeArg,
+    namespace: &str,
+) -> proc_macro2::TokenStream {
     let method_name = &method.name;
     let tx_method_name = format_ident!("{}_tx", method_name);
     // 使用全限定名：Namespace.sqlId
@@ -708,49 +707,45 @@ fn generate_method_impl_tx(method: &MethodInfo, db_type: DbTypeArg, namespace: &
                 ).await
             }
         }
-        ReturnKind::Optional(inner_ty) => {
-            match db_type {
-                DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
-                        &self.manager,
-                        tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await
-                },
-                _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
-                        &self.manager,
-                        tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await?;
-                    Ok(result.into_iter().next())
-                },
-            }
-        }
-        ReturnKind::One(inner_ty) => {
-            match db_type {
-                DbTypeArg::Sqlite => quote! {
-                    #internal_mod::query_one_typed_tx::<#inner_ty, _>(
-                        &self.manager,
-                        tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await
-                },
-                _ => quote! {
-                    let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
-                        &self.manager,
-                        tx,
-                        #sql_id,
-                        #params_expr,
-                    ).await?;
-                    result.into_iter().next()
-                        .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
-                },
-            }
-        }
+        ReturnKind::Optional(inner_ty) => match db_type {
+            DbTypeArg::Sqlite => quote! {
+                #internal_mod::query_optional_typed_tx::<#inner_ty, _>(
+                    &self.manager,
+                    tx,
+                    #sql_id,
+                    #params_expr,
+                ).await
+            },
+            _ => quote! {
+                let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
+                    &self.manager,
+                    tx,
+                    #sql_id,
+                    #params_expr,
+                ).await?;
+                Ok(result.into_iter().next())
+            },
+        },
+        ReturnKind::One(inner_ty) => match db_type {
+            DbTypeArg::Sqlite => quote! {
+                #internal_mod::query_one_typed_tx::<#inner_ty, _>(
+                    &self.manager,
+                    tx,
+                    #sql_id,
+                    #params_expr,
+                ).await
+            },
+            _ => quote! {
+                let result: Vec<#inner_ty> = #internal_mod::query_list_typed_tx(
+                    &self.manager,
+                    tx,
+                    #sql_id,
+                    #params_expr,
+                ).await?;
+                result.into_iter().next()
+                    .ok_or_else(|| markdown_sql::MarkdownSqlError::not_found(#sql_id))
+            },
+        },
         ReturnKind::Scalar => {
             match db_type {
                 DbTypeArg::Sqlite => quote! {
@@ -909,7 +904,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let db_type = args.db_type;
-    
+
     // 从 sql_file 提取命名空间（用于生成全限定 SQL ID）
     let namespace = extract_namespace(sql_file);
 

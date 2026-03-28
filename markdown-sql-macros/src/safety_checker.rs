@@ -23,14 +23,11 @@ const SAFE_FILTERS: &[&str] = &["bind_join", "raw_safe"];
 
 /// 不安全的 {{ }} 语法正则
 /// 匹配 {{ xxx }} 模式
-static UNSAFE_OUTPUT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\{\{\s*[^}]+\s*\}\}").unwrap()
-});
+static UNSAFE_OUTPUT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{\s*[^}]+\s*\}\}").unwrap());
 
 /// 安全过滤器正则
-static SAFE_FILTER_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\|\s*(bind_join|raw_safe)").unwrap()
-});
+static SAFE_FILTER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\|\s*(bind_join|raw_safe)").unwrap());
 
 /// 安全检查错误
 #[derive(Debug, Clone)]
@@ -92,9 +89,7 @@ impl SafetyChecker {
 
     /// 检查多个 SQL 块
     #[allow(dead_code)]
-    pub fn check_all(
-        blocks: &[(String, String)],
-    ) -> Result<(), Vec<SafetyError>> {
+    pub fn check_all(blocks: &[(String, String)]) -> Result<(), Vec<SafetyError>> {
         let mut errors = Vec::new();
 
         for (sql_id, content) in blocks {
@@ -155,10 +150,7 @@ mod tests {
 
     #[test]
     fn test_unsafe_join() {
-        let result = SafetyChecker::check(
-            "test",
-            "WHERE id IN ({{ ids | join(\",\") }})",
-        );
+        let result = SafetyChecker::check("test", "WHERE id IN ({{ ids | join(\",\") }})");
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -167,28 +159,19 @@ mod tests {
 
     #[test]
     fn test_safe_bind_join() {
-        let result = SafetyChecker::check(
-            "test",
-            "WHERE id IN ({{ ids | bind_join(\",\") }})",
-        );
+        let result = SafetyChecker::check("test", "WHERE id IN ({{ ids | bind_join(\",\") }})");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_safe_raw_safe() {
-        let result = SafetyChecker::check(
-            "test",
-            "SELECT * FROM {{ table | raw_safe }}",
-        );
+        let result = SafetyChecker::check("test", "SELECT * FROM {{ table | raw_safe }}");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_safe_param_binding() {
-        let result = SafetyChecker::check(
-            "test",
-            "WHERE name = #{name} AND age = #{age}",
-        );
+        let result = SafetyChecker::check("test", "WHERE name = #{name} AND age = #{age}");
         assert!(result.is_ok());
     }
 

@@ -48,9 +48,7 @@ pub struct SqlResult {
 
 /// 参数占位符正则：匹配 `#{param_name}`
 /// 支持：`#{id}`, `#{user_name}`, `#{user.name}`
-static PARAM_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"#\{(\w+(?:\.\w+)*)\}").unwrap()
-});
+static PARAM_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"#\{(\w+(?:\.\w+)*)\}").unwrap());
 
 /// 参数提取器
 pub struct ParamExtractor;
@@ -117,10 +115,7 @@ mod tests {
             "SELECT * FROM user WHERE id = #{id} AND name = #{name}",
             DbType::Mysql,
         );
-        assert_eq!(
-            result.sql,
-            "SELECT * FROM user WHERE id = ? AND name = ?"
-        );
+        assert_eq!(result.sql, "SELECT * FROM user WHERE id = ? AND name = ?");
         assert_eq!(result.params, vec!["id", "name"]);
     }
 
@@ -130,10 +125,7 @@ mod tests {
             "SELECT * FROM user WHERE id = #{id} AND name = #{name}",
             DbType::Postgres,
         );
-        assert_eq!(
-            result.sql,
-            "SELECT * FROM user WHERE id = $1 AND name = $2"
-        );
+        assert_eq!(result.sql, "SELECT * FROM user WHERE id = $1 AND name = $2");
         assert_eq!(result.params, vec!["id", "name"]);
     }
 
@@ -149,10 +141,7 @@ mod tests {
 
     #[test]
     fn test_extract_no_params() {
-        let result = ParamExtractor::extract(
-            "SELECT * FROM user",
-            DbType::Mysql,
-        );
+        let result = ParamExtractor::extract("SELECT * FROM user", DbType::Mysql);
         assert_eq!(result.sql, "SELECT * FROM user");
         assert!(result.params.is_empty());
     }

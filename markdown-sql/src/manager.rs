@@ -40,9 +40,8 @@ use crate::parser::{MarkdownParser, SqlBlock};
 
 /// include 命名空间正则
 /// 匹配 `{% include "sqlId" %}` 中的 sqlId
-static INCLUDE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"\{%\s*include\s*"([^"]+)"\s*%\}"#).unwrap()
-});
+static INCLUDE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"\{%\s*include\s*"([^"]+)"\s*%\}"#).unwrap());
 
 /// SQL 模板存储（使用 Arc 共享）
 type TemplateStore = Arc<RwLock<HashMap<String, String>>>;
@@ -78,17 +77,17 @@ impl SqlManager {
     /// 创建 MiniJinja 环境
     fn create_env(&self) -> Environment<'static> {
         let mut env = Environment::new();
-        
+
         // 注册自定义过滤器
         Self::register_filters(&mut env);
-        
+
         // 设置模板加载器
         let templates = self.templates.clone();
         env.set_loader(move |name| {
             let store = templates.read().unwrap();
             Ok(store.get(name).cloned())
         });
-        
+
         env
     }
 
@@ -113,9 +112,7 @@ impl SqlManager {
         // raw_safe 过滤器：显式声明安全的字符串拼接
         // 用法：{{ table_name | raw_safe }}
         // 注意：仅用于已验证安全的值（如枚举、预定义列表）
-        env.add_filter("raw_safe", |value: Value| -> String {
-            value.to_string()
-        });
+        env.add_filter("raw_safe", |value: Value| -> String { value.to_string() });
     }
 
     /// 设置数据库类型
@@ -198,15 +195,16 @@ impl SqlManager {
 
         for entry in dir.files() {
             let path = entry.path();
-            
+
             // 只处理 .md 文件
             if path.extension().map_or(false, |ext| ext == "md") {
-                let content = entry.contents_utf8().ok_or_else(|| {
-                    MarkdownSqlError::InvalidPath {
-                        path: path.display().to_string(),
-                        reason: "文件不是有效的 UTF-8".to_string(),
-                    }
-                })?;
+                let content =
+                    entry
+                        .contents_utf8()
+                        .ok_or_else(|| MarkdownSqlError::InvalidPath {
+                            path: path.display().to_string(),
+                            reason: "文件不是有效的 UTF-8".to_string(),
+                        })?;
 
                 let namespace = path
                     .file_stem()
@@ -217,11 +215,7 @@ impl SqlManager {
                 total += count;
 
                 if self.debug {
-                    tracing::debug!(
-                        "加载嵌入 SQL 文件: {} ({} 个 SQL)",
-                        path.display(),
-                        count
-                    );
+                    tracing::debug!("加载嵌入 SQL 文件: {} ({} 个 SQL)", path.display(), count);
                 }
             }
         }
@@ -241,7 +235,7 @@ impl SqlManager {
         namespace: &str,
     ) -> Result<()> {
         let mut store = self.templates.write().unwrap();
-        
+
         for (id, block) in blocks {
             // 使用命名空间：Namespace.sqlId
             let full_id = format!("{}.{}", namespace, id);
@@ -293,10 +287,10 @@ impl SqlManager {
     pub fn render<T: Serialize>(&self, sql_id: &str, params: &T) -> Result<String> {
         // 创建环境（带加载器）
         let env = self.create_env();
-        
-        let template = env.get_template(sql_id).map_err(|_| {
-            MarkdownSqlError::sql_not_found(sql_id, "未知")
-        })?;
+
+        let template = env
+            .get_template(sql_id)
+            .map_err(|_| MarkdownSqlError::sql_not_found(sql_id, "未知"))?;
 
         let context = Value::from_serialize(params);
         let rendered = template
@@ -401,9 +395,7 @@ impl Default for SqlManagerBuilder {
 }
 
 /// 全局 SQL 管理器
-static GLOBAL_MANAGER: Lazy<RwLock<SqlManager>> = Lazy::new(|| {
-    RwLock::new(SqlManager::new())
-});
+static GLOBAL_MANAGER: Lazy<RwLock<SqlManager>> = Lazy::new(|| RwLock::new(SqlManager::new()));
 
 /// 初始化全局 SQL 管理器
 pub fn init<P: AsRef<Path>>(path: P) -> Result<usize> {
@@ -529,9 +521,7 @@ WHERE 1=1
         assert!(sql.contains("AND status = #{status}"));
 
         // 无条件
-        let sql = manager
-            .render("findByCondition", &json!({}))
-            .unwrap();
+        let sql = manager.render("findByCondition", &json!({})).unwrap();
         assert!(!sql.contains("AND name"));
         assert!(!sql.contains("AND status"));
     }

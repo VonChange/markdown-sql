@@ -14,9 +14,9 @@ fn test_sql_dir() -> PathBuf {
 fn test_safe_sql_file_exists() {
     let safe_path = test_sql_dir().join("safe.md");
     assert!(safe_path.exists(), "安全 SQL 文件应该存在");
-    
+
     let content = fs::read_to_string(&safe_path).unwrap();
-    
+
     // 安全文件不应包含不安全模式
     assert!(!content.contains("{{ name }}"), "安全文件不应包含直接输出");
     assert!(content.contains("#{id}"), "安全文件应使用参数绑定");
@@ -27,9 +27,9 @@ fn test_safe_sql_file_exists() {
 fn test_unsafe_sql_file_exists() {
     let unsafe_path = test_sql_dir().join("unsafe.md");
     assert!(unsafe_path.exists(), "不安全 SQL 文件应该存在");
-    
+
     let content = fs::read_to_string(&unsafe_path).unwrap();
-    
+
     // 不安全文件包含不安全模式
     assert!(content.contains("{{ name }}"), "不安全文件应包含直接输出");
 }
@@ -55,7 +55,10 @@ SELECT * FROM user WHERE id IN ({{ ids | bind_join(",") }})
     let blocks: Vec<_> = safe_content
         .match_indices("```sql")
         .map(|(start, _)| {
-            let end = safe_content[start..].find("```\n").map(|e| start + e).unwrap_or(safe_content.len());
+            let end = safe_content[start..]
+                .find("```\n")
+                .map(|e| start + e)
+                .unwrap_or(safe_content.len());
             &safe_content[start..end]
         })
         .collect();
@@ -86,16 +89,16 @@ fn test_unsafe_pattern_detection() {
 
     for pattern in unsafe_patterns {
         // 检查是否能检测到不安全模式
-        let has_unsafe_output = pattern.contains("{{") 
-            && !pattern.contains("bind_join") 
+        let has_unsafe_output = pattern.contains("{{")
+            && !pattern.contains("bind_join")
             && !pattern.contains("raw_safe");
         assert!(has_unsafe_output, "应该检测到不安全模式: {}", pattern);
     }
 
     for pattern in safe_patterns {
         // 检查安全模式不会误报
-        let has_unsafe_output = pattern.contains("{{") 
-            && !pattern.contains("bind_join") 
+        let has_unsafe_output = pattern.contains("{{")
+            && !pattern.contains("bind_join")
             && !pattern.contains("raw_safe");
         assert!(!has_unsafe_output, "不应该误报安全模式: {}", pattern);
     }

@@ -65,11 +65,7 @@ impl ExecuteContext {
     pub fn log(&self) {
         debug!(
             "Executing: {}\n  SQL: {}\n  Params: {:?}\n  Duration: {:?}\n  Rows: {:?}",
-            self.sql_id,
-            self.final_sql,
-            self.param_names,
-            self.duration,
-            self.rows_affected
+            self.sql_id, self.final_sql, self.param_names, self.duration, self.rows_affected
         );
     }
 }
@@ -198,10 +194,7 @@ impl<'a> ParamBinder<'a> {
     /// 从 JSON 值提取参数
     ///
     /// 根据参数名列表从 JSON 对象中提取对应的值
-    pub fn extract_from_json(
-        &self,
-        value: &serde_json::Value,
-    ) -> Result<Vec<serde_json::Value>> {
+    pub fn extract_from_json(&self, value: &serde_json::Value) -> Result<Vec<serde_json::Value>> {
         let mut values = Vec::new();
 
         for name in self.param_names {
@@ -214,10 +207,7 @@ impl<'a> ParamBinder<'a> {
                 }
                 current.clone()
             } else {
-                value
-                    .get(name)
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null)
+                value.get(name).cloned().unwrap_or(serde_json::Value::Null)
             };
 
             values.push(val);
